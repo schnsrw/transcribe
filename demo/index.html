@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Casual-SST — live transcription demo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!--
+    Demo client for Casual-SST.
+
+    Architecture:
+      1. AudioWorklet captures 16 kHz mono float32 from the mic and posts
+         16384-sample buffers (≈ 1.024 s) back to the main thread.
+      2. Main thread converts float32 → int16 PCM, prepends the
+         Casual-SST 60-byte ASCII header `participant_id|lang`, and sends
+         the binary frame over the WebSocket.
+      3. Server emits JSON TranscriptionEvent records:
+           {id, participant_id, ts, text, type, variance, language}
+         We render interims in the top pane and finals as stacked rows.
+      4. `type: "language_change"` events trigger a banner showing the
+         new active language so code-switching is visible at a glance.
+
+    Browser support: Chrome / Edge / Brave. Firefox AudioWorklet at
+    16 kHz is flaky (test before relying).
+  -->
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">●</span>
+    <span class="name">Casual-SST</span>
+    <span class="tag">live transcription demo</span>
+  </div>
+  <div class="status">
+    <span id="ws-status" class="dot disconnected" title="WebSocket"></span>
+    <span id="active-lang" class="badge">lang: —</span>
+    <span id="profile-lang" class="badge muted" title="Most recently finalized language">profile: —</span>
+  </div>
+</header>
+
+<main>
+
+  <!-- ── Connection panel ──────────────────────────────────────────────── -->
+  <section class="panel">
+    <h2>Connection</h2>
+    <div class="row">
+      <label class="field">
+        <span>WS host</span>
+        <input id="ws-host" value="ws://localhost:8000/ws">
+      </label>
+      <label class="field">
+        <span>JWT (optional)</span>
+        <input id="jwt" placeholder="leave blank if bypass_auth is on">
+      </label>
+    </div>
+    <div class="row">
+      <label class="field">
+        <span>Header language</span>
+        <select id="lang-select"></select>
+      </label>
+      <label class="field">
+        <span>Meeting ID</span>
+        <input id="meeting-id" value="">
+      </label>
+      <label class="field">
+        <span>Participant ID</span>
+        <input id="participant-id" value="">
+      </label>
+    </div>
+    <div class="row buttons">
+      <button id="btn-start" class="primary">Transcribe</button>
+      <button id="btn-stop" disabled>Stop</button>
+      <button id="btn-mute">Mute</button>
+      <button id="btn-clear" class="ghost">Clear</button>
+    </div>
+  </section>
+
+  <!-- ── Interim (live partial) ────────────────────────────────────────── -->
+  <section class="panel interim-panel">
+    <h2>Interim</h2>
+    <div id="interim" class="interim">Waiting for audio…</div>
+  </section>
+
+  <!-- ── Finals stream ─────────────────────────────────────────────────── -->
+  <section class="panel">
+    <h2>Finals</h2>
+    <div id="finals" class="finals"></div>
+  </section>
+
+  <!-- ── Events log (language_change, errors) ──────────────────────────── -->
+  <section class="panel">
+    <h2>Events</h2>
+    <pre id="events" class="events"></pre>
+  </section>
+
+</main>
+
+<script>
+  /* ============================================================
+   * Casual-SST demo glue.
+   *
+   * Kept dependency-free on purpose — runs from any static file
+   * server (nginx in compose.dev.yaml, or `python3 -m http.server`).
+   * ============================================================ */
+
+  // The languages we surface in the dropdown. Order matters: most-used
+  // first. Virtual langs (auto/hi-en/hinglish) are grouped at the end
+  // and labeled so a tester sees what they're picking.
+  const LANGUAGES = [
+    // Native streaming via Voxtral
+    ['en', 'English'],
+    ['hi', 'Hindi'],
+    ['es', 'Spanish'],
+    ['fr', 'French'],
+    ['de', 'German'],
+    ['it', 'Italian'],
+    ['pt', 'Portuguese'],
+    ['ru', 'Russian'],
+    ['nl', 'Dutch'],
+    ['zh', 'Chinese (Mandarin)'],
+    ['ja', 'Japanese'],
+    ['ko', 'Korean'],
+    ['ar', 'Arabic'],
+    // Indic via AI4Bharat IndicConformer
+    ['ta', 'Tamil'],
+    ['bn', 'Bengali'],
+    ['mr', 'Marathi'],
+    ['te', 'Telugu'],
+    ['pa', 'Punjabi'],
+    ['gu', 'Gujarati'],
+    ['kn', 'Kannada'],
+    ['ml', 'Malayalam'],
+    // Code-switched / multilingual virtual codes
+    ['hinglish', '🌐 Hinglish (Hi+En)'],
+    ['hi-en', '🌐 Hi-En code-switch'],
+    ['ta-en', '🌐 Ta-En code-switch'],
+    ['bn-en', '🌐 Bn-En code-switch'],
+    ['auto',  '🌐 auto-detect'],
+  ];
+
+  // ── DOM refs ─────────────────────────────────────────────────
+  const $ = (id) => document.getElementById(id);
+  const elInterim       = $('interim');
+  const elFinals        = $('finals');
+  const elEvents        = $('events');
+  const elWsStatus      = $('ws-status');
+  const elActiveLang    = $('active-lang');
+  const elProfileLang   = $('profile-lang');
+  const elBtnStart      = $('btn-start');
+  const elBtnStop       = $('btn-stop');
+  const elBtnMute       = $('btn-mute');
+  const elBtnClear      = $('btn-clear');
+  const elLangSelect    = $('lang-select');
+  const elJwt           = $('jwt');
+  const elWsHost        = $('ws-host');
+  const elMeetingId     = $('meeting-id');
+  const elParticipantId = $('participant-id');
+
+  // ── State ─────────────────────────────────────────────────────
+  let ws = null;
+  let audioCtx = null;
+  let micStream = null;
+  let recorder = null;
+  let isSpeaking = false;
+  let isMuted = false;
+  let finals = [];
+
+  // ── Lang dropdown ────────────────────────────────────────────
+  for (const [code, label] of LANGUAGES) {
+    const opt = document.createElement('option');
+    opt.value = code;
+    opt.textContent = `${label} — ${code}`;
+    if (code === 'en') opt.selected = true;
+    elLangSelect.appendChild(opt);
+  }
+
+  // ── Bootstrap defaults ───────────────────────────────────────
+  elMeetingId.value = crypto.randomUUID();
+  elParticipantId.value = `demo-${Math.random().toString(36).slice(2, 8)}`;
+
+  // ── Logging ──────────────────────────────────────────────────
+  function log(line) {
+    const ts = new Date().toISOString().split('T')[1].slice(0, 12);
+    elEvents.textContent += `[${ts}] ${line}\n`;
+    elEvents.scrollTop = elEvents.scrollHeight;
+  }
+
+  // ── PCM conversion (Float32 [-1,1] → Int16 little-endian) ───
+  function floatToInt16(float32) {
+    const out = new Int16Array(float32.length);
+    for (let i = 0; i < float32.length; i++) {
+      const s = Math.max(-1, Math.min(1, float32[i]));
+      out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+    }
+    return out;
+  }
+
+  // ── 60-byte Casual-SST header ────────────────────────────────
+  // ASCII "participant_id|lang", null-padded to exactly 60 bytes.
+  function buildHeader(participantId, lang) {
+    const header = new Uint8Array(60);
+    const text = new TextEncoder().encode(`${participantId}|${lang}`);
+    header.set(text.subarray(0, 60), 0);
+    return header;
+  }
+
+  function buildFrame(participantId, lang, pcm16) {
+    const header = buildHeader(participantId, lang);
+    const frame = new Uint8Array(60 + pcm16.byteLength);
+    frame.set(header, 0);
+    frame.set(new Uint8Array(pcm16.buffer), 60);
+    return frame;
+  }
+
+  // ── WebSocket ────────────────────────────────────────────────
+  function setStatus(state) {
+    elWsStatus.classList.remove('disconnected', 'connecting', 'connected');
+    elWsStatus.classList.add(state);
+    elWsStatus.title = `WebSocket: ${state}`;
+  }
+
+  function wsConnect() {
+    const meetingId = elMeetingId.value.trim() || crypto.randomUUID();
+    const host = elWsHost.value.trim();
+    let url = `${host}/${encodeURIComponent(meetingId)}`;
+    const jwt = elJwt.value.trim();
+    if (jwt) url += `?auth_token=${encodeURIComponent(jwt)}`;
+
+    setStatus('connecting');
+    ws = new WebSocket(url);
+    ws.binaryType = 'arraybuffer';
+
+    ws.onopen = () => {
+      setStatus('connected');
+      log(`ws open ${url}`);
+    };
+    ws.onclose = () => {
+      setStatus('disconnected');
+      log('ws close');
+    };
+    ws.onerror = (e) => log('ws error');
+    ws.onmessage = (e) => handleServerMessage(JSON.parse(e.data));
+  }
+
+  function wsDisconnect() {
+    if (!ws) return;
+    // Send the single-byte disconnect signal so the server logs a clean close.
+    try { ws.send(new Uint8Array([0])); } catch {}
+    ws.close();
+    ws = null;
+  }
+
+  // ── Server → client message handling ─────────────────────────
+  function handleServerMessage(msg) {
+    if (msg.language) {
+      elActiveLang.textContent = `lang: ${msg.language}`;
+    }
+    if (msg.type === 'interim') {
+      elInterim.textContent = msg.text;
+    } else if (msg.type === 'final') {
+      elInterim.textContent = '…';
+      finals.push(msg);
+      renderFinals();
+      // Treat each final as evidence of the participant's dominant lang.
+      elProfileLang.textContent = `profile: ${msg.language || '—'}`;
+    } else if (msg.type === 'language_change') {
+      log(`LANGUAGE CHANGE → ${msg.language}`);
+      banner(`Switched to ${msg.language}`);
+    } else {
+      log(`unknown type: ${msg.type}`);
+    }
+  }
+
+  // ── Renderers ────────────────────────────────────────────────
+  function renderFinals() {
+    // Most recent at top. Keep DOM updates cheap by rebuilding from the
+    // finals array — never more than a few hundred items in a demo.
+    finals.sort((a, b) => b.ts - a.ts);
+    elFinals.innerHTML = '';
+    for (const f of finals) {
+      const row = document.createElement('div');
+      row.className = 'final-row';
+      const t = new Date(f.ts);
+      const time = t.toLocaleTimeString([], { hour12: false }) +
+                   '.' + String(t.getMilliseconds()).padStart(3, '0');
+      const lang = f.language || '?';
+      const variance = (f.variance ?? 0).toFixed(2);
+      row.innerHTML = `
+        <span class="ts">${time}</span>
+        <span class="lang-pill">${lang}</span>
+        <span class="prob-pill">p=${variance}</span>
+        <span class="text">${escapeHtml(f.text)}</span>
+      `;
+      elFinals.appendChild(row);
+    }
+  }
+
+  function banner(text) {
+    // Lightweight, transient notification — not a full toast lib.
+    const div = document.createElement('div');
+    div.className = 'banner';
+    div.textContent = text;
+    document.body.appendChild(div);
+    setTimeout(() => div.remove(), 2500);
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;');
+  }
+
+  // ── Microphone capture ───────────────────────────────────────
+  async function startCapture() {
+    // 16 kHz to match the wire protocol — browsers will resample for us.
+    audioCtx = new AudioContext({ sampleRate: 16000 });
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    await audioCtx.audioWorklet.addModule('recorder.worklet.js');
+    recorder = new AudioWorkletNode(audioCtx, 'recorder.worklet');
+    const source = audioCtx.createMediaStreamSource(micStream);
+    source.connect(recorder).connect(audioCtx.destination);
+
+    recorder.port.onmessage = (e) => {
+      if (!isSpeaking || isMuted || !ws || ws.readyState !== WebSocket.OPEN) return;
+      const pcm = floatToInt16(e.data);
+      const frame = buildFrame(
+        elParticipantId.value.trim(),
+        elLangSelect.value,
+        pcm,
+      );
+      ws.send(frame);
+    };
+  }
+
+  async function stopCapture() {
+    try { recorder?.disconnect(); } catch {}
+    try { micStream?.getTracks().forEach(t => t.stop()); } catch {}
+    try { await audioCtx?.close(); } catch {}
+    recorder = micStream = audioCtx = null;
+  }
+
+  // ── Button wiring ────────────────────────────────────────────
+  elBtnStart.addEventListener('click', async () => {
+    elBtnStart.disabled = true;
+    elLangSelect.disabled = true;
+    isSpeaking = true;
+    try {
+      await startCapture();
+      wsConnect();
+      elBtnStop.disabled = false;
+    } catch (err) {
+      log('start failed: ' + err.message);
+      elBtnStart.disabled = false;
+      elLangSelect.disabled = false;
+      isSpeaking = false;
+    }
+  });
+
+  elBtnStop.addEventListener('click', async () => {
+    isSpeaking = false;
+    elBtnStop.disabled = true;
+    await stopCapture();
+    wsDisconnect();
+    elBtnStart.disabled = false;
+    elLangSelect.disabled = false;
+  });
+
+  elBtnMute.addEventListener('click', () => {
+    isMuted = !isMuted;
+    elBtnMute.textContent = isMuted ? 'Unmute' : 'Mute';
+    if (micStream) {
+      micStream.getAudioTracks().forEach(t => t.enabled = !isMuted);
+    }
+  });
+
+  elBtnClear.addEventListener('click', () => {
+    finals = [];
+    elFinals.innerHTML = '';
+    elInterim.textContent = 'Waiting for audio…';
+    elEvents.textContent = '';
+  });
+</script>
+
+</body>
+</html>

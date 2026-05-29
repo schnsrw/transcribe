@@ -1,0 +1,57 @@
+# Casual-SST — local / development config
+# ----------------------------------------------------------------------------
+# Default CONFIG_PATH target. Inherits everything from base.yaml; this file
+# only overrides what should differ from prod (auth off, CPU-only, route
+# every language to whisper_turbo so the unimplemented backends do not
+# need to be loaded).
+# ----------------------------------------------------------------------------
+
+extends: base.yaml
+
+server:
+  bypass_auth: true        # local dev — no JWT needed
+  port: 8000
+
+# Override routing so every language goes through the only fully-implemented
+# backend (whisper_turbo). The Voxtral / Parakeet / IndicConformer stubs are
+# skipped — `Router.load_backends` only instantiates backends referenced in
+# `routes`, so this keeps local startup fast and dependency-light.
+routes:
+  en: whisper_turbo
+  hi: whisper_turbo
+  zh: whisper_turbo
+  ar: whisper_turbo
+  fr: whisper_turbo
+  de: whisper_turbo
+  es: whisper_turbo
+  it: whisper_turbo
+  ja: whisper_turbo
+  ko: whisper_turbo
+  nl: whisper_turbo
+  pt: whisper_turbo
+  ru: whisper_turbo
+  ta: whisper_turbo
+  bn: whisper_turbo
+  mr: whisper_turbo
+  te: whisper_turbo
+  pa: whisper_turbo
+  gu: whisper_turbo
+  kn: whisper_turbo
+  ml: whisper_turbo
+  hinglish: whisper_turbo
+  hi-en: whisper_turbo
+  ta-en: whisper_turbo
+  bn-en: whisper_turbo
+  auto: whisper_turbo
+  "*": whisper_turbo
+
+lid:
+  device: cpu
+
+backends:
+  whisper_turbo:
+    device: cpu
+    compute_type: int8     # CPU-friendly; full int8_float16 needs CUDA
+    # For local dev, a smaller model is faster and "good enough" to verify
+    # the pipeline. Override with WHISPER_MODEL env var or by editing here.
+    model: small

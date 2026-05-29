@@ -1,0 +1,31 @@
+# Casual-SST — production config
+# ----------------------------------------------------------------------------
+# Inherits everything from base.yaml. Overrides assume:
+#   - one CUDA GPU available (overridable per backend)
+#   - JWT auth enforced
+#   - full multi-backend routing (Voxtral + Parakeet + IndicConformer + Whisper)
+# ----------------------------------------------------------------------------
+
+extends: base.yaml
+
+server:
+  bypass_auth: false
+  port: 8000
+
+lid:
+  device: cuda
+
+backends:
+  voxtral:
+    device: cuda:0
+
+  parakeet:
+    device: cuda:0
+
+  indic_conformer:
+    device: cuda:0
+
+  whisper_turbo:
+    device: cuda
+    compute_type: int8_float16
+    model: large-v3-turbo

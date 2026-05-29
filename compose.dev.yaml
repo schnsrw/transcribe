@@ -1,0 +1,54 @@
+# Casual-SST — local development stack
+#
+# Brings up:
+#   * casual-sst (the API + WS server)  → http://localhost:8000
+#   * demo       (nginx serving demo/)  → http://localhost:8080
+#
+# Hugging Face model cache is a named volume — persists across rebuilds
+# so the first call downloads the Whisper model and subsequent runs reuse it.
+#
+# Usage:
+#   docker compose -f compose.dev.yaml up --build
+#   docker compose -f compose.dev.yaml down       # leaves the model cache
+#   docker compose -f compose.dev.yaml down -v    # wipes everything
+#
+# Open http://localhost:8080 in Chrome to drive the demo.
+
+services:
+  casual-sst:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: casual-sst:dev
+    container_name: casual-sst
+    environment:
+      CONFIG_PATH: /app/config/local.yaml
+    ports:
+      - "8000:8000"
+    volumes:
+      # Live-mount config + src so config tweaks and dev edits don't need a rebuild.
+      - ./config:/app/config:ro
+      - ./src:/app/src:ro
+      # Persistent HF model cache so we re-download the Whisper model once.
+      - hf-cache:/cache/huggingface
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('localhost',8000))"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
+  demo:
+    image: nginx:1.27-alpine
+    container_name: casual-sst-demo
+    ports:
+      - "8080:80"
+    volumes:
+      - ./demo:/usr/share/nginx/html:ro
+    depends_on:
+      casual-sst:
+        condition: service_healthy
+
+volumes:
+  hf-cache:
+    name: casual-sst-hf-cache

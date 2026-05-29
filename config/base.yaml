@@ -1,0 +1,194 @@
+# Casual-SST — base config
+# ----------------------------------------------------------------------------
+# Shared defaults for every environment. Do NOT set environment-specific
+# values here (host, port, device, auth). Those belong in local.yaml or
+# prod.yaml, which `extends: base.yaml` and override only what they need to.
+#
+# Loaded by casual_sst.router.load_config() which performs a recursive deep
+# merge of (env file) over (base.yaml). See docs/ARCHITECTURE.md for the
+# config layering rules.
+# ----------------------------------------------------------------------------
+
+server:
+  host: 0.0.0.0
+  port: 8000
+  # bypass_auth is set per-environment (true in local, false in prod).
+
+# ----------------------------------------------------------------------------
+# Routing — language code → backend name.
+#
+# Special virtual language codes:
+#   auto, multi          → multilingual, no language hint to model
+#   hi-en, ta-en, bn-en  → explicit bilingual code-switching pairs
+#   hinglish             → Hi-En code-switching (Devanagari + Latin output)
+#   "*"                  → fallback for anything not listed
+#
+# A language is allowed to map to any backend; the loader will instantiate
+# only the backends actually referenced here (see Router.load_backends).
+# ----------------------------------------------------------------------------
+routes:
+  # Voxtral Mini 4B Realtime (Apache 2.0, native streaming, 13 langs).
+  en: voxtral
+  hi: voxtral
+  zh: voxtral
+  ar: voxtral
+  fr: voxtral
+  de: voxtral
+  es: voxtral
+  it: voxtral
+  ja: voxtral
+  ko: voxtral
+  nl: voxtral
+  pt: voxtral
+  ru: voxtral
+
+  # AI4Bharat IndicConformer — Indic + Indic-English code-switching.
+  ta: indic_conformer
+  bn: indic_conformer
+  mr: indic_conformer
+  te: indic_conformer
+  pa: indic_conformer
+  gu: indic_conformer
+  kn: indic_conformer
+  ml: indic_conformer
+  hinglish: indic_conformer
+  hi-en: indic_conformer
+  ta-en: indic_conformer
+  bn-en: indic_conformer
+
+  # Multilingual / unknown source language → Voxtral with language=None.
+  auto: voxtral
+
+  # Fallback for any language not listed above.
+  "*": whisper_turbo
+
+# ----------------------------------------------------------------------------
+# Silero VAD knobs.
+#
+# Two flush timers handle the "user said one thing then went quiet" case
+# (ADR-007): short_flush_ms gives quick finalization for one-word answers,
+# long_flush_ms is the safety net for unflushed buffers.
+# ----------------------------------------------------------------------------
+vad:
+  threshold: 0.5
+  min_speech_ms: 250       # drop finals with less than this much detected speech
+  long_silence_ms: 1000    # mark long_silence when last speech is > this old
+  short_flush_ms: 500      # idle → finalize a short utterance after 500 ms
+  long_flush_ms: 2000      # idle → hard-flush the buffer after 2000 ms
+
+# ----------------------------------------------------------------------------
+# Background language ID worker (ADR-004).
+# Runs faster-whisper-tiny every N seconds of accumulated *speech* (not
+# wall-clock) over the last `window_ms` of audio.
+# ----------------------------------------------------------------------------
+lid:
+  enabled: true
+  interval_speech_ms: 3000
+  window_ms: 5000
+  model: faster-whisper-tiny
+  device: cpu              # overridden by env config when a GPU is available
+  switch_threshold: 0.85
+  switch_consecutive: 2
+  strong_lock_after_finals: 30
+
+# ----------------------------------------------------------------------------
+# Per-participant runtime profile (ADR-006). In-memory, dropped at WS close.
+# ----------------------------------------------------------------------------
+profile:
+  enabled: true
+  recent_finals_window: 5
+  use_profile_as_lid_tiebreaker: true
+
+# ----------------------------------------------------------------------------
+# Cut-mark — applies only to ChunkedASR backends (Whisper-family).
+# Splits a transcription into [final | interim] at a high-confidence
+# punctuated boundary, or biggest inter-word gap when audio is too long.
+# ----------------------------------------------------------------------------
+cut_mark:
+  min_chars: 48
+  min_probability: 0.7
+  force_split_after_s: 10
+
+# ----------------------------------------------------------------------------
+# Initial prompt seeding (replaces Whisper's condition_on_previous_text).
+# Each backend reads this section to build its prompt.
+# ----------------------------------------------------------------------------
+initial_prompt:
+  enabled: true
+  max_finals: 2
+  min_prob_for_seeding: 0.7
+  blacklist: ['. .', '...']
+
+# ----------------------------------------------------------------------------
+# Hallucination deny-list (docs/HALLUCINATION_GUARDS.md).
+# Per-language map; "*" is applied to every language as well.
+# Add new entries here as you observe them in the wild — they are data,
+# not code.
+# ----------------------------------------------------------------------------
+hallucination:
+  denylist:
+    en:
+      - "thank you for watching"
+      - "thanks for watching"
+      - "subtitles by"
+      - "amara.org"
+      - "subscribe to"
+      - "like and subscribe"
+      - "(music)"
+      - "[music]"
+      - "♪"
+      - ".com"
+      - "you"
+      - ". ."
+      - "..."
+    hi:
+      - "हमारे चैनल को सब्सक्राइब करें"
+    ta: []
+    "*":
+      - "♪"
+      - "..."
+
+# ----------------------------------------------------------------------------
+# Backend definitions. Each entry must declare:
+#   kind:     "native_streaming" | "chunked"
+#   module:   dotted import path "pkg.mod:ClassName"
+#   model:    backend-specific model identifier
+#
+# Per-environment configs override `device`, `compute_type`, and any
+# performance-tuning fields.
+# ----------------------------------------------------------------------------
+backends:
+  voxtral:
+    kind: native_streaming
+    module: casual_sst.backends.voxtral:VoxtralBackend
+    model: mistralai/Voxtral-Mini-4B-Realtime-2602
+    delay_ms: 480           # 240..2400 — lower = lower latency, higher = better accuracy
+    max_model_len: 45000
+    word_timestamps: true
+
+  parakeet:
+    kind: native_streaming
+    module: casual_sst.backends.parakeet:ParakeetBackend
+    model: nvidia/parakeet-tdt-0.6b-v3
+    compute_type: int8
+
+  indic_conformer:
+    kind: native_streaming
+    module: casual_sst.backends.indic_conformer:IndicConformerBackend
+    model: ai4bharat/indic-conformer-600m-multilingual
+    code_switch: true
+    romanize_output: false
+
+  whisper_turbo:
+    kind: chunked
+    module: casual_sst.backends.whisper_turbo:WhisperTurboBackend
+    model: large-v3-turbo
+    beam_size: 1
+    # The hallucination-guard knobs — see docs/HALLUCINATION_GUARDS.md
+    no_speech_threshold: 0.85
+    log_prob_threshold: -0.4
+    compression_ratio_threshold: 2.0
+    hallucination_silence_threshold: 2.0
+    condition_on_previous_text: false   # ignored by backend if set true
+    min_phrase_prob: 0.6
+    force_split_after_s: 8              # stricter than the cut_mark global setting

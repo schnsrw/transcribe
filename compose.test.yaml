@@ -1,0 +1,41 @@
+# Casual-SST — test runner stack
+#
+# Runs the pytest suite inside the same runtime image as the service.
+# Source + tests are mounted so iterating doesn't require a rebuild.
+#
+# Usage:
+#   docker compose -f compose.test.yaml run --rm tests
+#   docker compose -f compose.test.yaml run --rm tests pytest -k cut_mark -v
+#
+# The image needs the dev group too (pytest), so we install it on the fly
+# at container start. Slightly slower than baking it in, but keeps the
+# runtime image lean and avoids drift between "test image" and "real image".
+
+services:
+  tests:
+    image: casual-sst:dev
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: casual-sst-tests
+    environment:
+      CONFIG_PATH: /app/config/local.yaml
+      PYTHONPATH: /app/src
+    volumes:
+      - ./src:/app/src:ro
+      - ./tests:/app/tests:ro
+      - ./config:/app/config:ro
+      - ./pyproject.toml:/app/pyproject.toml:ro
+      - hf-cache:/cache/huggingface
+    working_dir: /app
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -e
+        pip install --quiet --no-cache-dir pytest pytest-asyncio
+        exec pytest tests/unit tests/integration -v "$@"
+
+volumes:
+  hf-cache:
+    name: casual-sst-hf-cache
+    external: true

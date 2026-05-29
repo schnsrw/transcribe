@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "casual-sst"
 version = "0.1.0"
-description = "Lightweight multilingual live-call transcription. Jigasi-compatible."
+description = "Casual-SST — lightweight multilingual live-call transcription. Jigasi-compatible."
 authors = ["melp"]
 readme = "README.md"
 packages = [{ include = "casual_sst", from = "src" }]
@@ -14,9 +14,19 @@ pydantic = "^2"
 pyyaml = "^6"
 numpy = "^1.26"
 silero-vad = "^5"
-faster-whisper = "^1.1"   # used for whisper_turbo backend AND for tiny LID model
+faster-whisper = "^1.1"    # used for whisper_turbo backend AND for tiny LID model
 uuid6 = "^2024.7.10"
 
+# Dev group — pytest stack. Installed by default with `poetry install`
+# (no `optional = true`) so test deps are always available locally and
+# in CI. Compose.test.yaml installs these explicitly inside the image.
+[tool.poetry.group.dev]
+[tool.poetry.group.dev.dependencies]
+pytest = "^8"
+pytest-asyncio = "^0.24"
+
+# Optional GPU backends — installed only when the corresponding routing
+# is enabled in prod. Keeps the default image lean.
 [tool.poetry.group.voxtral]
 optional = true
 [tool.poetry.group.voxtral.dependencies]
@@ -33,6 +43,13 @@ optional = true
 [tool.poetry.group.indic.dependencies]
 # AI4Bharat IndicConformer — install per their docs
 nemo-toolkit = { version = "^2", extras = ["asr"] }
+
+[tool.pytest.ini_options]
+# Auto mode = `async def test_*` works without an explicit @pytest.mark.asyncio.
+asyncio_mode = "auto"
+testpaths = ["tests/unit", "tests/integration"]
+addopts = "-ra --strict-markers"
+pythonpath = ["src"]
 
 [build-system]
 requires = ["poetry-core"]

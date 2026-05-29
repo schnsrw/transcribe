@@ -1,0 +1,61 @@
+# Match .gitignore plus a few build-only excludes so the image is small
+# and rebuilds don't bust the layer cache on noise.
+
+.git
+.gitignore
+.github
+
+# Python build/cache
+__pycache__
+*.py[cod]
+*$py.class
+*.egg-info
+.eggs
+build
+dist
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# Virtual envs
+.venv
+venv
+env
+
+# Tests + e2e — included only in the test-runner compose (mounted as volume)
+tests
+
+# Editor / OS
+.vscode
+.idea
+.DS_Store
+
+# Demo isn't needed by the API container (it's served by a separate nginx)
+demo
+
+# Docs — not shipped in the runtime image
+docs
+*.md
+!README.md
+
+# Local config + secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Model weights
+models
+*.bin
+*.pt
+*.safetensors
+*.gguf
+*.onnx
+
+# Node / Playwright
+node_modules
+playwright-report
+test-results
+playwright/.cache

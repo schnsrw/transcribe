@@ -27,8 +27,12 @@ Casual-SST/
 ├── CLAUDE.md                # this file
 ├── README.md                # quick start, points at docs
 ├── pyproject.toml
+├── Dockerfile               # multi-stage, slim runtime, non-root user
+├── compose.dev.yaml         # local dev: API + demo + HF cache volume
+├── compose.test.yaml        # pytest runner in container (no host deps)
+├── .dockerignore
 ├── config/
-│   ├── base.yaml            # shared defaults
+│   ├── base.yaml            # shared defaults (deep-merged into env files)
 │   ├── local.yaml           # dev, CPU, auth bypass — CONFIG_PATH default
 │   └── prod.yaml            # GPU, JWT, full models
 ├── docs/
@@ -99,8 +103,22 @@ Casual-SST/
    `docs/DECISIONS.md` *before* the code change.
 3. Update the relevant unit/integration test first.
 4. Make the code change.
-5. Re-run tests.
+5. Re-run tests **in Docker**:
+   `docker compose -f compose.test.yaml run --rm tests`.
 6. Update CLAUDE.md only if a new invariant was introduced.
+
+## Running anything — Docker only
+
+Never run the server or tests on the host. Everything goes through the
+two compose files:
+
+- `compose.dev.yaml` — API + demo, model cache persisted in
+  `casual-sst-hf-cache` named volume.
+- `compose.test.yaml` — pytest in the same image as the service. Mounts
+  source/tests as volumes for fast iteration.
+
+The user has been explicit: no lingering host residue (no `pip install`,
+no global model downloads, no leftover venvs).
 
 ## What NOT to do
 
