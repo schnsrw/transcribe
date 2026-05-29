@@ -26,7 +26,11 @@ def fake_vad(monkeypatch):
     ``fake_vad.set_segments([...])``.
     """
     class _FakeVad:
-        _segments: list[dict] = []
+        # ``None`` means "no explicit configuration → use default behaviour";
+        # ``[]`` means "explicit silence" (set_silent). Distinguishing the
+        # two is important — otherwise set_silent looks identical to
+        # "uninitialised" and falls through to the default-speech path.
+        _segments: list[dict] | None = None
 
         @classmethod
         def set_segments(cls, segs: list[dict]) -> None:
@@ -41,10 +45,10 @@ def fake_vad(monkeypatch):
             cls._segments = []
 
     def _speech_timestamps(audio, threshold=0.5):
-        # If a test set explicit segments, return those. Otherwise infer
-        # one segment that spans the whole buffer.
-        if _FakeVad._segments:
+        # Explicit configuration (including the empty list = silent) wins.
+        if _FakeVad._segments is not None:
             return _FakeVad._segments
+        # Default: treat the whole non-empty buffer as one speech segment.
         if not audio:
             return []
         from casual_sst.frame import bytes_to_seconds

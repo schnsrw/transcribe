@@ -18,6 +18,10 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: casual-sst-tests
+    # Override the Dockerfile's `casual` non-root user so the entrypoint's
+    # ad-hoc `pip install pytest pytest-asyncio` can write into /opt/venv.
+    # This is test-runner-only — the prod image still runs as `casual`.
+    user: "0:0"
     environment:
       CONFIG_PATH: /app/config/local.yaml
       PYTHONPATH: /app/src
@@ -26,7 +30,6 @@ services:
       - ./tests:/app/tests:ro
       - ./config:/app/config:ro
       - ./pyproject.toml:/app/pyproject.toml:ro
-      - hf-cache:/cache/huggingface
     working_dir: /app
     entrypoint: ["sh", "-c"]
     command:
@@ -34,8 +37,3 @@ services:
         set -e
         pip install --quiet --no-cache-dir pytest pytest-asyncio
         exec pytest tests/unit tests/integration -v "$@"
-
-volumes:
-  hf-cache:
-    name: casual-sst-hf-cache
-    external: true

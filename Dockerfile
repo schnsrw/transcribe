@@ -3,47 +3,57 @@
 # Casual-SST — single Dockerfile, multi-stage.
 #
 # Goals:
-#   * Slim runtime (~300 MB without models)
+#   * Slim runtime (~700 MB with torch CPU + ctranslate2)
 #   * ffmpeg installed (faster-whisper requires libav*)
 #   * Model weights are NEVER baked in — they download into the
 #     Hugging Face cache, which is mounted as a named volume by compose
 #     so iterating on the image does not re-download.
 #   * Tests run in the same image (no Python deps on the host).
+#
+# We use plain pip rather than poetry because poetry's resolver gets
+# stuck exploring legacy versions of unrelated transitive deps
+# (huggingface_hub → datasets old releases). Pinning at the install
+# layer with explicit version ranges keeps build time predictable.
 # ----------------------------------------------------------------------------
 
 ARG PYTHON_VERSION=3.11
-ARG POETRY_VERSION=1.8.3
 
 # ---------- Stage 1: builder ----------
-# Build wheels / install deps into an isolated venv so the runtime stage
-# can copy just the venv without dragging compilers along.
+# Build an isolated venv so the runtime stage can copy just /opt/venv
+# without dragging build tools along.
 FROM python:${PYTHON_VERSION}-slim AS builder
 
-ARG POETRY_VERSION
-ENV POETRY_NO_INTERACTION=1 \
-    POETRY_VIRTUALENVS_IN_PROJECT=1 \
-    POETRY_CACHE_DIR=/tmp/poetry_cache \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_NO_CACHE_DIR=1
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_PREFER_BINARY=1
 
-# Build-time system packages. We install ffmpeg *here* too because some
-# Python deps (notably faster-whisper) link against libav* at build time.
+# Build-time system packages. ffmpeg + libsndfile are runtime libs that
+# silero-vad / faster-whisper need; build-essential covers any wheel
+# that has to compile a small C extension.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         ffmpeg \
         libsndfile1 \
-        git \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir "poetry==${POETRY_VERSION}"
+# Isolated venv.
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
-WORKDIR /app
-COPY pyproject.toml ./
-# Only install the base group. The voxtral / parakeet / indic optional
-# groups carry GPU-heavy deps (vLLM, NeMo) that are wired up later from
-# config/prod.yaml — they are not needed for local dev or CI.
-RUN poetry install --no-root --without dev --only main \
-    && rm -rf $POETRY_CACHE_DIR
+# Upgrade pip + install wheel/build first so binary wheels are preferred.
+RUN pip install --upgrade pip wheel setuptools
+
+# Casual-SST runtime deps. CPU-only torch is pulled in transitively by
+# silero-vad. Versions are pinned to ranges that match pyproject.toml.
+RUN pip install \
+        "fastapi>=0.115,<0.116" \
+        "uvicorn[standard]>=0.30,<0.32" \
+        "pydantic>=2,<3" \
+        "pyyaml>=6,<7" \
+        "numpy>=1.26,<2" \
+        "silero-vad>=5,<6" \
+        "faster-whisper>=1.1,<2" \
+        "uuid6>=2024.7.10"
 
 
 # ---------- Stage 2: runtime ----------
@@ -58,7 +68,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PATH="/app/.venv/bin:$PATH" \
+    PATH="/opt/venv/bin:$PATH" \
     HF_HOME=/cache/huggingface \
     XDG_CACHE_HOME=/cache \
     CONFIG_PATH=/app/config/local.yaml
@@ -67,7 +77,7 @@ ENV PYTHONUNBUFFERED=1 \
 RUN useradd --create-home --uid 1001 --shell /bin/bash casual
 
 WORKDIR /app
-COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /opt/venv /opt/venv
 COPY --chown=casual:casual src /app/src
 COPY --chown=casual:casual config /app/config
 COPY --chown=casual:casual pyproject.toml /app/pyproject.toml
