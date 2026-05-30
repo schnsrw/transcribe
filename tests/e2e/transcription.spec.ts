@@ -18,6 +18,13 @@
 import { test, expect, Page } from '@playwright/test';
 
 const hasFakeAudio = !!process.env.FAKE_AUDIO;
+// The compose.dev.yaml stack exposes the API on 8100 (8000 was taken
+// on this machine). Override via WS_HOST if you remap ports.
+const WS_HOST = process.env.WS_HOST ?? 'ws://localhost:8100/ws';
+
+async function setWsHost(page: Page) {
+  await page.locator('#ws-host').fill(WS_HOST);
+}
 
 async function waitForWsConnected(page: Page) {
   await page.waitForFunction(() => {
@@ -57,6 +64,7 @@ test.describe('transcription flow', () => {
     });
 
     await page.goto('/');
+    await setWsHost(page);
     await page.locator('#btn-start').click();
     await waitForWsConnected(page);
 
@@ -68,6 +76,7 @@ test.describe('transcription flow', () => {
   test.skip(!hasFakeAudio, 'requires FAKE_AUDIO env var pointing at a 16kHz mono WAV');
   test('receives at least one final from the server', async ({ page }) => {
     await page.goto('/');
+    await setWsHost(page);
     await page.locator('#btn-start').click();
     await waitForWsConnected(page);
 

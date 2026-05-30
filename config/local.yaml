@@ -52,6 +52,8 @@ backends:
   whisper_turbo:
     device: cpu
     compute_type: int8     # CPU-friendly; full int8_float16 needs CUDA
-    # For local dev, a smaller model is faster and "good enough" to verify
-    # the pipeline. Override with WHISPER_MODEL env var or by editing here.
+    # On Mac M4 through Docker amd64 emulation:
+    #   `base`  (140 MB) ≈ 0.4 RTF — fastest, mediocre accuracy.
+    #   `small` (480 MB) ≈ 0.8 RTF — much better accuracy, still real-time-ish.
+    #   `medium` (1.5 GB) — too slow under emulation, skip.
     model: small

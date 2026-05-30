@@ -21,10 +21,15 @@ services:
       dockerfile: Dockerfile
     image: casual-sst:dev
     container_name: casual-sst
+    # Local dev runs as root so the named hf-cache volume is writable
+    # without a pre-chown ritual. Prod (compose-not-shipped) still uses
+    # the Dockerfile's non-root `casual` user.
+    user: "0:0"
     environment:
       CONFIG_PATH: /app/config/local.yaml
+      PYTHONPATH: /app/src
     ports:
-      - "8000:8000"
+      - "8100:8000"
     volumes:
       # Live-mount config + src so config tweaks and dev edits don't need a rebuild.
       - ./config:/app/config:ro
@@ -42,7 +47,7 @@ services:
     image: nginx:1.27-alpine
     container_name: casual-sst-demo
     ports:
-      - "8080:80"
+      - "8180:80"
     volumes:
       - ./demo:/usr/share/nginx/html:ro
     depends_on:

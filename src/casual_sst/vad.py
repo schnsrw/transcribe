@@ -16,7 +16,9 @@ monkey-patch this module never have to load the .pt file.
 
 from __future__ import annotations
 
-from silero_vad import get_speech_timestamps, load_silero_vad, read_audio
+import numpy as np
+import torch
+from silero_vad import get_speech_timestamps, load_silero_vad
 
 from .frame import bytes_to_seconds
 
@@ -32,20 +34,17 @@ def model():
     return _model
 
 
-def _wav_header(audio_bytes: bytes, sample_rate: int = 16000) -> bytes:
-    """Build a minimal RIFF/WAV header so we can hand a headerless PCM
-    buffer to silero's ``read_audio`` (which expects a file-like blob)."""
-    samples = len(audio_bytes) // 2
-    bits_per_sample = 16
-    channels = 1
-    datasize = samples * channels * bits_per_sample // 8
-    o = b"RIFF" + (datasize + 36).to_bytes(4, "little")
-    o += b"WAVEfmt " + (16).to_bytes(4, "little") + (1).to_bytes(2, "little")
-    o += channels.to_bytes(2, "little") + sample_rate.to_bytes(4, "little")
-    o += (sample_rate * channels * bits_per_sample // 8).to_bytes(4, "little")
-    o += (channels * bits_per_sample // 8).to_bytes(2, "little")
-    o += bits_per_sample.to_bytes(2, "little") + b"data" + datasize.to_bytes(4, "little")
-    return o
+def _pcm_to_waveform(audio: bytes) -> torch.Tensor:
+    """Convert raw 16 kHz mono s16le PCM into the float32 torch tensor that
+    silero's ``get_speech_timestamps`` expects.
+
+    We bypass silero's own ``read_audio`` helper because it goes through
+    ``torchaudio.list_audio_backends()`` which was removed in torchaudio
+    2.x. We already know the format (it is the wire format), so building
+    the tensor directly is both faster and version-independent.
+    """
+    arr = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
+    return torch.from_numpy(arr.copy())  # copy() so torch doesn't share buffer with bytes
 
 
 def speech_timestamps(audio: bytes, threshold: float = 0.5) -> list[dict]:
@@ -56,8 +55,7 @@ def speech_timestamps(audio: bytes, threshold: float = 0.5) -> list[dict]:
     """
     if len(audio) == 0:
         return []
-    stream = _wav_header(audio) + audio
-    waveform = read_audio(stream)
+    waveform = _pcm_to_waveform(audio)
     return get_speech_timestamps(waveform, model=model(), threshold=threshold, return_seconds=True)
 
 

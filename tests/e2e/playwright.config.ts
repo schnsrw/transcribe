@@ -23,7 +23,7 @@ export default defineConfig({
   reporter: [['list'], ['html', { outputFolder: 'playwright-report', open: 'never' }]],
   timeout: 60_000,
   use: {
-    baseURL: process.env.DEMO_URL ?? 'http://localhost:8080',
+    baseURL: process.env.DEMO_URL ?? 'http://localhost:8180',
     trace: 'on-first-retry',
     video: 'retain-on-failure',
     screenshot: 'only-on-failure',
