@@ -205,3 +205,143 @@ Operational alerts catch persistent failures.
 - Quality is predictable per language.
 - A bad backend deploy means transcription stops for affected langs,
   loudly. Better than silent quality regression.
+
+---
+
+## ADR-009 — Idle-flush must NOT reset the working buffer
+
+**Status:** Accepted (2026-05-31, replaces earlier "long-idle hard-reset")
+
+**Context.** An earlier version of `meeting.flush_idle` did
+`state._reset_buffer()` whenever `idle > long_flush_ms`. The intent was
+"if a participant has been silent for >2 s and we couldn't flush, drop
+the stale buffer". In practice this race-fired against any chunked
+transcribe that took longer than 2 s — and on Mac M4 CPU, almost every
+transcribe does. The buffer was wiped before the in-flight transcribe
+finished reading it, then `_emit_from_chunked` happily ran cut-mark
+math against an emptied buffer and emitted partial / wrong text.
+
+Real user symptom: "I spoke for one minute, the transcript was empty
+until I muted." Force-flush only kicked in after the audio stream
+stopped because every flush_idle iteration before that was zeroing the
+buffer.
+
+**Decision.** Remove the long-idle reset from `meeting.flush_idle`
+entirely. `force_short_flush` already resets the buffer on the paths
+that emit a final OR drop a sub-min_speech utterance — the separate
+hard-reset is both redundant and unsafe.
+
+**Consequences.**
+- A buffer that genuinely cannot be flushed (e.g. all silence) will
+  sit until `force_short_flush` decides it's not worth transcribing,
+  which is still O(seconds). Acceptable.
+- The unit/integration tests already covered force_short_flush's
+  reset paths — no test changed; the bug was strictly in
+  `meeting.flush_idle`.
+
+---
+
+## ADR-010 — Deny-list short tokens require exact-text match
+
+**Status:** Accepted (2026-05-31)
+
+**Context.** The hallucination deny-list is configured per-language
+plus a `"*"` wildcard. Skynet's port substring-matched every entry:
+`if b in text: drop`. For phrases ("thank you for watching") that's
+fine — they only appear when Whisper hallucinates the YouTube outro.
+For short tokens it's catastrophic:
+
+- `"you"` (a known Whisper silence hallucination) matched ANY word
+  containing `you` — `your`, `young`, `yours`, `youth`.
+- `"..."` (meant to catch ". . ." silence loops) matched ANY
+  partial Whisper transcription that ended with an ellipsis like
+  `"I'd like to test how..."` — i.e. effectively all interims.
+
+Real user symptom: the interim panel was empty for the entire
+monologue, because every interim ended with `"..."`.
+
+**Decision.** Two-mode matching in `filters._matches_ban`:
+- **Multi-word phrase** (contains a space) → substring match anywhere.
+- **Single token** (no space) → match only if the whole text equals
+  the token.
+
+That keeps catching the actual Whisper failure modes (a bare `you`,
+a bare `...`) without eating legitimate transcripts.
+
+**Consequences.**
+- 3 new regression tests in `tests/unit/test_filters.py` guard against
+  re-introduction.
+- If we later discover a *short* token that needs substring matching,
+  the right fix is to add a more specific multi-word phrase, not to
+  loosen the rule.
+
+---
+
+## ADR-011 — Drop the cross-boundary buffer on language switch
+
+**Status:** Accepted (2026-05-31)
+
+**Context.** When LID flips `LangState.active_lang` mid-call (EN → HI),
+the participant's working buffer contains audio that straddles the
+language boundary. The original `_handle_switch_transition` called
+`force_short_flush()` BEFORE the mode flipped back to LOCKED, which
+ran `_force_final_chunked` under the NEW language — i.e. it tried to
+transcribe the pre-switch English audio with `lang=hi`. Whisper
+produced phonetic gibberish.
+
+Real user symptom: "I was speaking English then shifted to Hindi and
+after something to English. All transcript was gibberish, not remotely
+close to what I was speaking."
+
+**Decision.** On a switch, drop the buffer entirely:
+
+```python
+async def _handle_switch_transition(self):
+    await self.close()           # release native stream handle if any
+    self._reset_buffer()         # drop the cross-boundary audio
+    self.lang_state.mode = RouteMode.LOCKED
+    return [language_change_event]
+```
+
+We lose 0-2 s of audio at the switch point. Better than emitting
+confidently-wrong text.
+
+**Considered and rejected.**
+- Snapshot the OLD lang before the switch, drain with it, then flip.
+  Adds state, doesn't recover much because Whisper on the cross-
+  boundary audio is already lower quality.
+- Re-route per chunk via lang=None auto-detect. We do that anyway in
+  MULTILINGUAL mode (which is now the demo default — see ADR-012).
+
+**Consequences.**
+- Mid-call lang switches lose ≤2 s of audio at the boundary.
+- Code-switching speakers should use the `auto` virtual language code
+  rather than rely on LID-driven switches.
+
+---
+
+## ADR-012 — Demo defaults to `lang=auto` for multilingual
+
+**Status:** Accepted (2026-05-31)
+
+**Context.** Originally the browser demo defaulted to `lang=en`. That
+puts `LangState` into LOCKED mode, so:
+- LID switching CAN fire, but with a 6-8 s lag (window + hysteresis).
+- During the lag, the wrong language hint is sent to Whisper.
+- See [[ADR-011]] for the gibberish that produces.
+
+Users who actually wanted "I might speak more than one language" had
+no clean path — `auto` was in the dropdown but not the default.
+
+**Decision.** Demo dropdown defaults to `lang=auto`. That maps to
+`LangState.from_header("auto")` → `RouteMode.MULTILINGUAL`, which
+sends `language=None` to the model on every chunk. Whisper
+auto-detects per chunk, no LID is consulted, no buffer-drop transition
+is needed.
+
+**Consequences.**
+- Code-switching just works out of the box.
+- Pure-monolingual speakers see slightly worse first-chunk results
+  because Whisper has to auto-detect once before settling.
+  Acceptable trade-off; users who know their language can pick it
+  explicitly from the dropdown.

@@ -65,7 +65,8 @@ Casual-SST/
 └── tests/
     ├── unit/                # pytest, deterministic modules
     ├── integration/         # pytest, mock backends, full pipeline
-    └── e2e/                 # Playwright, demo.html → live server
+    ├── e2e/                 # Playwright, demo.html → live server
+    └── live/                # Python harness: 25 cases over WS, real audio
 ```
 
 ## Invariants — do not break these
@@ -83,6 +84,17 @@ Casual-SST/
    not adding pipeline branches in `participant.py`.
 5. **Language state is per-participant**, not per-chunk. The Jigasi
    header `lang` is a *hint*, not truth; the LID worker can override it.
+6. **`meeting.flush_idle` MUST NOT call `state._reset_buffer()`** —
+   see ADR-009. Race against in-flight transcribes wipes the audio
+   they were reading. `force_short_flush` already resets correctly on
+   the paths where reset is meaningful.
+7. **Deny-list short tokens (no space) match exact text only** — see
+   ADR-010. Substring-matching `"you"` against `"your"` or `"..."`
+   against any truncated interim drops legitimate transcripts.
+8. **`_handle_switch_transition` drops the buffer; it does NOT drain
+   it under the new language** — see ADR-011. Draining cross-boundary
+   audio under the new language hint produces gibberish; losing <2 s
+   at the switch is the lesser evil.
 
 ## Conventions
 
@@ -110,15 +122,25 @@ Casual-SST/
 ## Running anything — Docker only
 
 Never run the server or tests on the host. Everything goes through the
-two compose files:
+compose files:
 
 - `compose.dev.yaml` — API + demo, model cache persisted in
   `casual-sst-hf-cache` named volume.
 - `compose.test.yaml` — pytest in the same image as the service. Mounts
   source/tests as volumes for fast iteration.
+- `tests/live/` — Python harness that exercises the running dev stack
+  over WebSocket with real-audio fixtures (English / Hindi / Spanish /
+  German / silence / hallucination trap). Run with:
+  ```
+  docker exec casual-sst python /tmp/run_cases.py
+  ```
+  (after `docker cp tests/live/run_cases.py casual-sst:/tmp/` and
+  staging the fixtures). See `tests/live/README.md`.
 
 The user has been explicit: no lingering host residue (no `pip install`,
-no global model downloads, no leftover venvs).
+no global model downloads, no leftover venvs). Playwright on the host
+is the one accepted exception, because it drives a containerised
+server over `localhost`.
 
 ## What NOT to do
 

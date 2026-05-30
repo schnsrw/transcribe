@@ -40,10 +40,33 @@ what config says — see `backends/whisper_turbo.py` and ADR-003.
 |---|---|---|---|
 | Cut-mark requires avg word prob ≥ 0.7 | `cut_mark.min_probability` | `cut_mark.find` | Low-confidence "finals". Stay as interim until they earn the upgrade. |
 | Force biggest-gap split when audio > 8 s | `force_split_after_s: 8` (turbo-specific override) | `cut_mark.find` | Runaway over-long transcripts that snowball. Skynet used 10 s; turbo loops sooner. |
-| Hallucination deny-list (per-lang + `*`) | `config.hallucination.denylist` | `filters.is_hallucination` | Training-corpus artifacts: "thank you for watching", "subtitles by", "amara.org", "♪", bare "you", etc. |
+| Hallucination deny-list (per-lang + `*`) | `config.hallucination.denylist` | `filters.is_hallucination` | Training-corpus artifacts: "thank you for watching", "subtitles by", "amara.org", "♪", bare "you", etc. **Matching is two-mode — see below.** |
 | Minimum phrase probability after decode | `min_phrase_prob: 0.6` | `filters.is_hallucination` | Decoded but low-confidence — likely confabulation. |
 | Repetition detector (same token ≥ 4 times) | hard-coded | `filters._repeats` | Catches loops the compression-ratio threshold missed. |
 | `initial_prompt` blacklist (skip seeding bad finals) | `['. .', '...']` plus `min_prob_for_seeding: 0.7` | `participant._record_final` | Prevents a noisy final from poisoning the next call's prompt. |
+
+## Deny-list match semantics
+
+The matcher in `filters._matches_ban` is split into two modes —
+see ADR-010 for the reasoning:
+
+| Ban entry | Mode | Example |
+|---|---|---|
+| Contains a space (multi-word phrase) | **substring match** anywhere in text | `"thank you for watching"` drops `"end thank you for watching everyone today"` |
+| No space (single short token) | **exact-text-only** match | `"you"` drops `"you"` alone but NOT `"your name is John"` |
+
+This is load-bearing. The earlier substring-everywhere matcher
+silently dropped legitimate words:
+
+- `"you"` matched `"your"`, `"young"`, `"yours"`, `"youth"`.
+- `"..."` matched ANY Whisper interim ending in an ellipsis — which
+  is most of them.
+
+Real-world symptom: the interim panel stayed blank during a long
+monologue because every interim hit the `"..."` deny-list. The
+two-mode split fixes that without losing the actual loop-hallucination
+catches — the repetition detector (`_repeats`, ≥ 4 same tokens in a
+row) still drops `"you you you you"`.
 
 ## Why the layering matters
 
