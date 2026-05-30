@@ -83,12 +83,14 @@ vad:
 # ----------------------------------------------------------------------------
 lid:
   enabled: true
-  # Faster detection cadence — original 3 s / 5 s window meant a real
-  # mid-call lang switch (EN→HI→EN) needed 6-8 s before the routing
-  # caught up, during which the active backend was hearing the wrong
-  # language and emitting gibberish.
-  interval_speech_ms: 1500
-  window_ms: 2500
+  # We tried shorter (1.5 s / 2.5 s) for snappier mid-call switches but
+  # on emulated CPU the LID worker stole compute from the main
+  # whisper-turbo transcribe — 1 s of Hindi started taking ~27 s
+  # because the threads were thrashing. The user's recommended path
+  # for code-switching is `lang=auto` (skips LID entirely), so we keep
+  # LID at the safer 3 s / 5 s cadence for the explicit-language case.
+  interval_speech_ms: 3000
+  window_ms: 5000
   model: faster-whisper-tiny
   device: cpu              # overridden by env config when a GPU is available
   switch_threshold: 0.85

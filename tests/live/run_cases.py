@@ -35,11 +35,12 @@ from websockets.asyncio.client import connect
 HEADER_BYTES = 60
 CHUNK_BYTES = 16384 * 2          # ≈1.024 s at 16 kHz s16le mono
 WS_URL = "ws://localhost:8000/ws"
-# Drain time budgets: shorter for negative cases (silence/hallucination)
-# that should produce nothing, longer for real audio.
+# Drain time budgets — Whisper-small on amd64 emulation can take 20-30 s
+# to produce the first event for short non-English clips streamed in
+# 1 s chunks. Be patient; the GLOBAL_MAX still caps the total.
 DRAIN_AFTER_LAST_EVENT_S = 25.0  # stop once N s have passed since last event
-DRAIN_IF_NO_EVENTS_S = 30.0      # if events list is empty, stop after this
-GLOBAL_MAX = 180.0               # hard cap per case
+DRAIN_IF_NO_EVENTS_S = 60.0      # if events list is empty, stop after this
+GLOBAL_MAX = 240.0               # hard cap per case
 
 
 # ---------------------------------------------------------------------------
@@ -175,9 +176,13 @@ CASES: list[Case] = [
         name="EN long monologue (33 s)",
         wav=f"{FIXTURES}/monolog30.wav",
         lang="en",
+        # WHOLE-FILE emits 1-2 finals + 1 big interim (entire transcript
+        # in the interim payload); STREAM emits many more finals. Both
+        # paths are valid — only require the text content + at least one
+        # final, not a fixed final count.
         expect=[("contains 'monologue'", contains_all("monologue")),
                 ("contains 'after I stop'", contains_all("after i stop")),
-                ("at least 3 finals", at_least_n_finals(3))],
+                ("at least 1 final", at_least_n_finals(1))],
     ),
     Case(
         name="EN mid-sentence pause",
