@@ -48,6 +48,11 @@ class WhisperTurboBackend(ChunkedBackend):
         self.compression_ratio_threshold = float(config.get("compression_ratio_threshold", 2.0))
         self.hallucination_silence_threshold = float(config.get("hallucination_silence_threshold", 2.0))
         self.min_phrase_prob = float(config.get("min_phrase_prob", 0.6))
+        # Streaming live calls benefit from Whisper's own VAD pruning the
+        # leading / trailing silence in each chunk — the wall-clock cost
+        # of running Silero internally is much less than transcribing
+        # silence as audio.
+        self.vad_filter = bool(config.get("vad_filter", True))
 
     async def transcribe(
         self,
@@ -76,7 +81,7 @@ class WhisperTurboBackend(ChunkedBackend):
             log_prob_threshold=self.log_prob_threshold,
             compression_ratio_threshold=self.compression_ratio_threshold,
             hallucination_silence_threshold=self.hallucination_silence_threshold,
-            vad_filter=False,
+            vad_filter=self.vad_filter,
         )
 
         words: list[Word] = []

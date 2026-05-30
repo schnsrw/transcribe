@@ -58,6 +58,30 @@ def test_keeps_legitimate_repetition() -> None:
     assert not is_hallucination(_r("no no no thanks"), "en", DENYLIST)
 
 
+# ---------- regression: deny-list must not eat legitimate transcripts ------
+def test_short_ban_does_not_eat_inflected_words() -> None:
+    # "you" is on the deny-list. It must NOT drop "your name is John" or
+    # "young people" — these are legitimate transcriptions that happen to
+    # contain the bytes "you". Match is exact-text-only for short bans.
+    assert not is_hallucination(_r("your name is John"), "en", DENYLIST)
+    assert not is_hallucination(_r("young people"), "en", DENYLIST)
+    assert not is_hallucination(_r("Did you see that?"), "en", DENYLIST)
+
+
+def test_short_ban_still_drops_exact_text() -> None:
+    # The Whisper "you" loop hallucination IS still caught when it is
+    # the whole text. (Plus the repetition detector also catches loops.)
+    assert is_hallucination(_r("you"), "en", DENYLIST)
+    assert is_hallucination(_r("..."), "en", DENYLIST)
+
+
+def test_ellipsis_in_partial_transcription_not_dropped() -> None:
+    # Whisper sometimes appends "..." to indicate a truncated chunk.
+    # That MUST NOT trigger the deny-list — only a bare "..." does.
+    assert not is_hallucination(_r("I'd like to test how..."), "en", DENYLIST)
+    assert not is_hallucination(_r("hello, this is..."), "en", DENYLIST)
+
+
 # ---------- in_prompt_blacklist -----------------------------------------
 def test_prompt_blacklist_substring() -> None:
     assert in_prompt_blacklist(". .", [". .", "..."])

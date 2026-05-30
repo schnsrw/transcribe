@@ -68,17 +68,21 @@ class MeetingConnection:
     async def flush_idle(self) -> None:
         """Called once per second by the global flush loop.
 
-        Walks every participant and:
-          * triggers short-utterance finalization when they've been
-            silent for ``short_flush_ms`` (default 500 ms)
-          * hard-resets their buffer when they've been silent for
-            ``long_flush_ms`` (default 2000 ms)
+        For every participant that has been idle for at least
+        ``short_flush_ms`` (default 500 ms) we ask the pipeline to
+        finalize whatever is in its working buffer.
 
-        See ADR-007 for the "user said one thing then went quiet" case.
+        We do NOT additionally ``_reset_buffer()`` after a long-idle
+        threshold — an earlier version did, but that wiped buffers
+        mid-transcribe (the race fires whenever a slow chunked
+        transcription holds ``is_transcribing=True`` for longer than
+        ``long_flush_ms``). ``force_short_flush`` already resets the
+        buffer correctly on the paths that emit a final or drop a
+        sub-min_speech utterance, so the separate hard-reset is both
+        redundant and unsafe.
         """
         now = _now_ms()
         short_ms = self.cfg["vad"]["short_flush_ms"]
-        long_ms = self.cfg["vad"]["long_flush_ms"]
         for pid, state in list(self.participants.items()):
             idle = now - state.last_chunk_ms
             if idle < short_ms:
@@ -86,8 +90,6 @@ class MeetingConnection:
             events = await state.force_short_flush()
             for ev in events:
                 await self._send(ev)
-            if idle > long_ms:
-                state._reset_buffer()
 
     async def close(self) -> None:
         """Tear down: close every native-streaming handle, then the WS."""

@@ -43,6 +43,15 @@ def is_hallucination(
         Drop anything whose avg confidence is below this. Pass 0 to
         disable the gate (e.g. for non-Whisper backends that report
         less reliable confidences).
+
+    Deny-list matching rules:
+      * Whole-text exact match → drop.
+      * Multi-word phrase (contains a space) → substring match.
+        Catches "thank you for watching", "subscribe to" etc.
+      * Single short token (no space) → exact match against the whole
+        text only. Prevents "you" from eating "young"/"your" and
+        "..." from eating any partial transcription Whisper truncated
+        with an ellipsis.
     """
     text = result.text.strip().lower()
     if not text:
@@ -55,15 +64,30 @@ def is_hallucination(
     # Combine language-specific + wildcard deny-list entries.
     bans = list(denylist.get(language, [])) + list(denylist.get("*", []))
     for ban in bans:
-        b = ban.strip().lower()
-        if not b:
-            continue
-        if b == text or b in text:
+        if _matches_ban(ban, text):
             return True
 
     if _repeats(text, threshold=4):
         return True
 
+    return False
+
+
+def _matches_ban(ban: str, text: str) -> bool:
+    """Match ``ban`` against ``text`` using the rules in
+    :func:`is_hallucination`'s docstring."""
+    b = ban.strip().lower()
+    if not b:
+        return False
+    if b == text:
+        return True
+    # Multi-word phrase → substring match anywhere in the text.
+    if " " in b:
+        return b in text
+    # Single token without space → exact-text-only match (already
+    # handled by the `b == text` line above). Substring matches are
+    # disallowed here to avoid `you`/`...` swallowing legitimate
+    # transcriptions like "your" / "I'd like…".
     return False
 
 

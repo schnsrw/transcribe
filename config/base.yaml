@@ -105,9 +105,12 @@ profile:
 # punctuated boundary, or biggest inter-word gap when audio is too long.
 # ----------------------------------------------------------------------------
 cut_mark:
-  min_chars: 48
-  min_probability: 0.7
-  force_split_after_s: 10
+  # Streaming-friendly defaults: split earlier so chunked Whisper never
+  # has to transcribe more than ~4 s of audio at a time. Larger values
+  # are safer for accuracy but kill latency under amd64 emulation.
+  min_chars: 24
+  min_probability: 0.6
+  force_split_after_s: 4
 
 # ----------------------------------------------------------------------------
 # Initial prompt seeding (replaces Whisper's condition_on_previous_text).
@@ -190,5 +193,6 @@ backends:
     compression_ratio_threshold: 2.0
     hallucination_silence_threshold: 2.0
     condition_on_previous_text: false   # ignored by backend if set true
-    min_phrase_prob: 0.6
-    force_split_after_s: 8              # stricter than the cut_mark global setting
+    min_phrase_prob: 0.5                # streaming: lower bar to surface partials sooner
+    force_split_after_s: 4              # Jigasi 1 s chunks — keep buffer small for latency
+    vad_filter: true                    # let Whisper skip silence inside the buffer
