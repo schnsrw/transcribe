@@ -209,14 +209,20 @@ CASES: list[Case] = [
         name="Hindi short",
         wav=f"{FIXTURES}/hello-hi.wav",
         lang="hi",
-        expect=[("contains 'नमस्ते'", contains_all("नमस्ते")),
+        # Accept either Devanagari (small/large-v3 quality) or Latin
+        # transliteration (tiny/base fall back to "Namaste").
+        expect=[("contains 'नमस्ते' or 'namaste'",
+                 lambda t, _e: "नमस्ते" in t or "namaste" in t.lower()),
                 ("at least 1 event", at_least_n_events(1))],
     ),
     Case(
         name="Hindi longer",
         wav=f"{FIXTURES}/hindi-long.wav",
         lang="hi",
-        expect=[("contains 'राजेश' or 'बेंगलुरु'", lambda t, _e: "राजेश" in t or "बेंगलुरु" in t),
+        # Either script — Rajesh / Bangalore / Bengaluru / राजेश / बेंगलुरु.
+        expect=[("contains rajesh OR bangalore (any script)",
+                 lambda t, _e: any(n in t.lower() for n in
+                                   ["राजेश", "बेंगलुरु", "rajesh", "bangalore", "bengaluru"])),
                 ("at least 1 event", at_least_n_events(1))],
     ),
     Case(
