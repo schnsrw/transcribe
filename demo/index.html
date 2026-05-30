@@ -171,7 +171,9 @@
     const opt = document.createElement('option');
     opt.value = code;
     opt.textContent = `${label} — ${code}`;
-    if (code === 'en') opt.selected = true;
+    // Default to `auto` so code-switching just works without LID
+    // having to chase a mid-call language change.
+    if (code === 'auto') opt.selected = true;
     elLangSelect.appendChild(opt);
   }
 

@@ -434,34 +434,46 @@ class ParticipantState:
     async def _on_lid(self, lid: LIDResult) -> None:
         """Callback wired into :class:`LIDWorker`. Applies the profile
         tiebreaker (ADR-006) before pushing into the state machine.
+
+        We only let the profile override LID when the participant is
+        already "locked strong" (≥ ``strong_lock_after`` finals in a
+        single language). Before that, we trust LID — otherwise the
+        very first language a participant speaks gets imprinted and
+        subsequent code-switching is silently ignored.
         """
-        if self.cfg["profile"]["use_profile_as_lid_tiebreaker"]:
-            dominant = self.profile.dominant_lang()
-            if dominant and dominant != lid.language and lid.probability < 0.95:
-                # Profile disagrees with weak LID → trust the profile.
-                return
+        if (
+            self.cfg["profile"]["use_profile_as_lid_tiebreaker"]
+            and self.profile.locked_strong
+            and self.profile.dominant_lang() != lid.language
+            and lid.probability < 0.95
+        ):
+            return
         self.lang_state.observe(
             lid.language, lid.probability, self.profile, _now_ms()
         )
 
     async def _handle_switch_transition(self) -> list[TranscriptionEvent]:
-        """Drain old backend, close native handle, emit ``language_change``.
+        """Drop the cross-language buffer + close any native stream, then
+        emit a single ``language_change`` event.
 
-        Called when the LangState reports ``SWITCHED``. We flip the
-        mode back to LOCKED at the end so future chunks go through
-        the new active backend.
+        The working buffer contains audio that straddles the language
+        boundary — transcribing it under EITHER language produces
+        nonsense (we saw this in the wild: EN→HI→EN read back as
+        gibberish). Better to lose 1-2 s of speech at the boundary than
+        to emit confidently-wrong text, so we discard the buffer here.
+        After this returns, the next chunk starts fresh under the new
+        ``active_lang``.
         """
-        flush = await self.force_short_flush()
         await self.close()
+        self._reset_buffer()
         self.lang_state.mode = RouteMode.LOCKED
-        event = self._build_event(
+        return [self._build_event(
             text="",
             ts_ms=_now_ms(),
             final=False,
             variance=0.0,
             type_="language_change",
-        )
-        return flush + [event]
+        )]
 
     # -----------------------------------------------------------------
     # Helpers

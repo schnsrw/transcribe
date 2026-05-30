@@ -83,8 +83,12 @@ vad:
 # ----------------------------------------------------------------------------
 lid:
   enabled: true
-  interval_speech_ms: 3000
-  window_ms: 5000
+  # Faster detection cadence — original 3 s / 5 s window meant a real
+  # mid-call lang switch (EN→HI→EN) needed 6-8 s before the routing
+  # caught up, during which the active backend was hearing the wrong
+  # language and emitting gibberish.
+  interval_speech_ms: 1500
+  window_ms: 2500
   model: faster-whisper-tiny
   device: cpu              # overridden by env config when a GPU is available
   switch_threshold: 0.85
