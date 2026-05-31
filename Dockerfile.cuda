@@ -52,13 +52,16 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 RUN pip install --upgrade pip wheel setuptools
 
-# Same pin set as the CPU Dockerfile, BUT torch is pulled from the
-# CUDA wheel index this time. ctranslate2 / faster-whisper use the
-# CUDA libraries provided by the base image, not torch's.
+# Same pin set as the CPU Dockerfile, BUT torch + torchaudio are
+# pulled from the CUDA wheel index this time so they match the cu124
+# ABI. ctranslate2 / faster-whisper use the CUDA libraries provided
+# by the base image, not torch's; we still need torchaudio here for
+# silero-vad's transitive dep.
 RUN pip install \
         --index-url https://download.pytorch.org/whl/cu124 \
         --extra-index-url https://pypi.org/simple \
-        "torch>=2.4,<3"
+        "torch>=2.4,<3" \
+        "torchaudio>=2.4,<3"
 
 RUN pip install \
         "fastapi>=0.115,<0.116" \

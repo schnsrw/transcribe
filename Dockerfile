@@ -46,13 +46,19 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 RUN pip install --upgrade pip wheel setuptools
 
-# 1) torch CPU wheel FIRST from PyTorch's CPU index. This avoids the
-#    GPU torch (and its ~6 GB of nvidia-* / cuda-* transitive packages)
-#    that would otherwise be selected by default on PyPI.
+# 1) torch + torchaudio CPU wheels FIRST from PyTorch's CPU index.
+#    Avoids the GPU torch (and its ~6 GB of nvidia-* / cuda-*
+#    transitive packages) that would otherwise be selected by default
+#    on PyPI. torchaudio MUST be pinned here too — silero-vad pulls
+#    it transitively and PyPI's default amd64 torchaudio is built
+#    against torch+CUDA, which causes a `.so` ABI mismatch with our
+#    torch+CPU install (Linux only; Mac arm64 has CPU-only torchaudio
+#    by default so it doesn't trip there).
 RUN pip install \
         --index-url https://download.pytorch.org/whl/cpu \
         --extra-index-url https://pypi.org/simple \
-        "torch>=2.4,<3"
+        "torch>=2.4,<3" \
+        "torchaudio>=2.4,<3"
 
 # 2) The rest of the stack. silero-vad will see torch already installed
 #    and won't pull the GPU build in transitively.
