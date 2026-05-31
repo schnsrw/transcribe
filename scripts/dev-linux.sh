@@ -42,6 +42,7 @@ pip install --quiet --upgrade pip wheel setuptools
 pip install --quiet \
     "fastapi>=0.115,<0.116" \
     "uvicorn[standard]>=0.30,<0.32" \
+    "wsproto>=1.2" \
     "pydantic>=2,<3" \
     "pyyaml>=6,<7" \
     "numpy>=1.26,<2" \
@@ -66,4 +67,7 @@ echo "[dev-linux] Casual-SST on http://localhost:${PORT}  (Ctrl-C to stop)"
 echo "[dev-linux] Config: $CONFIG_PATH"
 echo ""
 
-exec uvicorn casual_sst.main:app --host 0.0.0.0 --port "$PORT" --reload --reload-dir src
+exec uvicorn casual_sst.main:app \
+    --host 0.0.0.0 --port "$PORT" \
+    --ws wsproto \
+    --reload --reload-dir src

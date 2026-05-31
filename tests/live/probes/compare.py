@@ -27,9 +27,13 @@ import wave
 
 from websockets.asyncio.client import connect
 
+import os
+
 HEADER_BYTES = 60
 CHUNK_BYTES = 16384 * 2          # ≈1.024 s at 16 kHz s16le mono
-WS_URL = "ws://localhost:8000/ws"
+# Default 8000 matches the in-container view; override with WS_URL=...
+# when running on the host against `make dev-mac` (port 8100).
+WS_URL = os.environ.get("WS_URL", "ws://localhost:8000/ws")
 
 
 async def run(label: str, wav_path: str, lang: str, *, stream: bool) -> None:
