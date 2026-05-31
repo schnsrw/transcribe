@@ -27,14 +27,20 @@ Casual-SST/
 ├── CLAUDE.md                # this file
 ├── README.md                # quick start, points at docs
 ├── pyproject.toml
+├── Makefile                 # make dev-mac / dev-linux / dev-docker / test / prod
+├── scripts/
+│   ├── dev-mac.sh           # host-side launcher: .venv-mac + mlx-whisper + Metal
+│   └── dev-linux.sh         # host-side launcher: .venv-linux + faster-whisper CUDA
 ├── Dockerfile               # multi-stage, slim runtime, non-root user
 ├── compose.dev.yaml         # local dev: API + demo + HF cache volume
 ├── compose.test.yaml        # pytest runner in container (no host deps)
 ├── .dockerignore
 ├── config/
 │   ├── base.yaml            # shared defaults (deep-merged into env files)
-│   ├── local.yaml           # dev, CPU, auth bypass — CONFIG_PATH default
-│   └── prod.yaml            # GPU, JWT, full models
+│   ├── local.yaml           # Docker CPU dev — used by compose.dev.yaml
+│   ├── dev-mac.yaml         # host on Mac, mlx_whisper backend (Metal GPU)
+│   ├── dev-linux.yaml       # host on Linux, faster-whisper (CUDA if present)
+│   └── prod.yaml            # Docker on Linux + CUDA + JWT
 ├── docs/
 │   ├── ARCHITECTURE.md      # system overview + diagrams + patterns
 │   ├── CODEGRAPH.md         # module map + dependency graph
@@ -58,7 +64,8 @@ Casual-SST/
 │   ├── types.py             # protocols, dataclasses
 │   └── backends/
 │       ├── base.py
-│       ├── whisper_turbo.py     # ChunkedASR — fully implemented
+│       ├── whisper_turbo.py     # ChunkedASR — faster-whisper (Linux/prod)
+│       ├── mlx_whisper.py       # ChunkedASR — mlx-whisper (Mac dev, Metal)
 │       ├── voxtral.py           # NativeStreamingASR — stub
 │       ├── parakeet.py          # NativeStreamingASR — stub
 │       └── indic_conformer.py   # NativeStreamingASR — stub
@@ -119,7 +126,22 @@ Casual-SST/
    `docker compose -f compose.test.yaml run --rm tests`.
 6. Update CLAUDE.md only if a new invariant was introduced.
 
-## Running anything — Docker only
+## Running anything — `make <target>`
+
+The Makefile is the entry point for the four run-mode squares:
+
+| Target | Where it runs | Backend | When to use |
+|---|---|---|---|
+| `make dev-mac` | host (Apple Silicon) | mlx-whisper on Metal GPU | Daily dev on M-series Mac. Fastest local iteration. |
+| `make dev-linux` | host (Linux) | faster-whisper, CUDA if present | Dev on a Linux box, matches prod. |
+| `make dev-docker` | containers | faster-whisper CPU | Cross-platform / CI / "works everywhere". Slow on Mac. |
+| `make test` | containers | (mocks) | pytest unit + integration suite. |
+| `make prod` | containers (Linux + CUDA) | faster-whisper | Production deploy. JWT enforced. |
+
+ADR-013 explains why Mac dev cannot be containerised (Apple GPU cannot
+be passed through Docker on macOS).
+
+## Running anything — Docker only (legacy section, applies to dev-docker / test / prod)
 
 Never run the server or tests on the host. Everything goes through the
 compose files:

@@ -1,0 +1,71 @@
+# Casual-SST — Mac (Apple Silicon) host-mode dev config
+# ----------------------------------------------------------------------------
+# Activated by `make dev-mac` via scripts/dev-mac.sh. Bypasses Docker
+# entirely; runs uvicorn against a host-side .venv-mac/ that has
+# mlx-whisper installed for Apple-Metal-accelerated transcription.
+#
+# Why a separate config: Docker on macOS can't expose the Apple GPU to
+# containers (see ADR-013). To get GPU acceleration on a dev laptop we
+# have to run on the host. This config wires the mlx_whisper backend in
+# place of faster-whisper.
+#
+# Production parity: same OpenAI weights (large-v3-turbo), same
+# hallucination knobs, same wire protocol. Word-timestamp precision can
+# drift ≤80 ms vs prod — guarded by tests/live/probes/parity.py.
+# ----------------------------------------------------------------------------
+
+extends: base.yaml
+
+server:
+  bypass_auth: true
+  port: 8100
+
+# All languages route to the MLX backend. LID is unchanged.
+routes:
+  en: mlx_whisper
+  hi: mlx_whisper
+  zh: mlx_whisper
+  ar: mlx_whisper
+  fr: mlx_whisper
+  de: mlx_whisper
+  es: mlx_whisper
+  it: mlx_whisper
+  ja: mlx_whisper
+  ko: mlx_whisper
+  nl: mlx_whisper
+  pt: mlx_whisper
+  ru: mlx_whisper
+  ta: mlx_whisper
+  bn: mlx_whisper
+  mr: mlx_whisper
+  te: mlx_whisper
+  pa: mlx_whisper
+  gu: mlx_whisper
+  kn: mlx_whisper
+  ml: mlx_whisper
+  hinglish: mlx_whisper
+  hi-en: mlx_whisper
+  ta-en: mlx_whisper
+  bn-en: mlx_whisper
+  auto: mlx_whisper
+  "*": mlx_whisper
+
+lid:
+  device: cpu                  # LID model stays on CPU; tiny model, fine.
+
+backends:
+  mlx_whisper:
+    kind: chunked
+    module: casual_sst.backends.mlx_whisper:MLXWhisperBackend
+    # mlx-community pre-converts OpenAI weights to MLX format. Pick the
+    # quantised checkpoint if 16 GB RAM gets tight; turbo fp16 is ~1.6 GB.
+    path_or_hf_repo: mlx-community/whisper-large-v3-turbo
+    beam_size: 1
+    # Hallucination guards — match production exactly.
+    no_speech_threshold: 0.85
+    logprob_threshold: -0.4
+    compression_ratio_threshold: 2.0
+    min_phrase_prob: 0.5
+    force_split_after_s: 4
+    # Re-instantiate every N calls to dodge mlx-examples #1254 leak.
+    reset_after_calls: 200

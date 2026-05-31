@@ -25,6 +25,13 @@ uuid6 = "^2024.7.10"
 pytest = "^8"
 pytest-asyncio = "^0.24"
 
+# Apple Silicon host-mode dev — installed only on macOS arm64 via
+# scripts/dev-mac.sh, never in the Docker image. See ADR-013.
+[tool.poetry.group.mac-dev]
+optional = true
+[tool.poetry.group.mac-dev.dependencies]
+mlx-whisper = "^0.4.1"
+
 # Optional GPU backends — installed only when the corresponding routing
 # is enabled in prod. Keeps the default image lean.
 [tool.poetry.group.voxtral]

@@ -17,6 +17,8 @@ htmlcov/
 .venv/
 venv/
 env/
+.venv-mac/
+.venv-linux/
 
 # Poetry
 poetry.lock

@@ -345,3 +345,76 @@ is needed.
   because Whisper has to auto-detect once before settling.
   Acceptable trade-off; users who know their language can pick it
   explicitly from the dropdown.
+
+---
+
+## ADR-013 — Dual-runtime: mlx-whisper for Mac dev, faster-whisper for Linux + prod
+
+**Status:** Accepted (2026-05-31)
+
+**Context.** Docker Desktop on macOS cannot expose Apple Metal or the
+Neural Engine to Linux containers ([Docker's own announcement, 2026]
+confirms they ship "Docker Model Runner" specifically because Metal
+passthrough is impossible). Our existing stack — `faster-whisper`
+running on Linux + CUDA in production — therefore degrades to CPU-only
+on Mac dev, taking 30-60 s per chunked transcribe of Hindi long
+audio. That's unusable for iteration.
+
+We need a Mac dev path that uses the M-series GPU, while keeping the
+existing Linux+CUDA prod path untouched.
+
+**Decision.** Two backends, picked by config:
+
+- `casual_sst.backends.whisper_turbo` — faster-whisper + CTranslate2.
+  Used by `dev-docker`, `dev-linux`, and **prod**. CUDA or CPU.
+- `casual_sst.backends.mlx_whisper` — `mlx-whisper` on Apple Metal.
+  Used by `dev-mac` only. Lives in the optional `mac-dev` poetry
+  group; never installed in the Docker image.
+
+Both backends:
+- Load the **same OpenAI Whisper weights** (large-v3-turbo by default).
+- Implement the same `ChunkedASR` protocol with identical kwargs:
+  `no_speech_threshold`, `compression_ratio_threshold`,
+  `condition_on_previous_text=False`, `initial_prompt`, `beam_size=1`,
+  `word_timestamps=True`.
+- Return the same `ASRResult` shape — the pipeline above (cut-mark,
+  filters, profile) doesn't know which one ran.
+
+**Considered and rejected.**
+- `whisper.cpp + pywhispercpp` (Metal). Close second — same C++ family
+  Linux fallback. Rejected because mlx-whisper is ≈2× faster on M4
+  large-v3-turbo per Jan 2026 benchmarks, and the DTW word-timestamp
+  reimplementation in whisper.cpp has documented drift vs OpenAI.
+- `openai-whisper` + `device='mps'`. Word timestamps are broken on
+  MPS in current PyTorch (transformers issue #36093).
+- `WhisperKit` on ANE. Swift-only — subprocess boundary kills our
+  async pipeline ergonomics. Worth revisiting when there's a clean
+  Python binding.
+- `insanely-fast-whisper` on MPS. Semantic differences in
+  `condition_on_previous_text` would diverge from prod.
+
+**Parity caveats (must be guarded by tests).**
+1. **Tokenizer identical** — same tiktoken multilingual base. Devanagari
+   handling, language codes, special tokens all match.
+2. **Word-timestamp precision drifts ≤80 ms** between mlx-whisper's
+   Python DTW port and faster-whisper's CT2 implementation. Affects
+   cut-mark split timestamps, not text content. `tests/live/probes/
+   parity.py` diffs both backends on the same fixture nightly.
+3. **VAD ownership stays in our pipeline.** Neither backend's internal
+   VAD is enabled (`vad_filter=False` semantics for both); we run
+   Silero VAD in `casual_sst.vad` upstream so the gate is identical.
+4. **Kwarg name alias**: faster-whisper says `log_prob_threshold`,
+   mlx-whisper says `logprob_threshold`. The MLX backend accepts both.
+5. **Memory leak** with `word_timestamps=True` in mlx-examples #1254.
+   Mitigated by re-instantiating every `reset_after_calls` (default
+   200) calls.
+
+**Consequences.**
+- `.venv-mac/` and `.venv-linux/` are gitignored host-side venvs created
+  by `scripts/dev-mac.sh` and `scripts/dev-linux.sh`. `make clean`
+  wipes them. This is the "minimal host residue" carve-out from the
+  no-host-residue rule.
+- Two backends to maintain, but the surface is small (~100 LOC each)
+  and the contract is enforced by the protocol type.
+- New regression risk: forgetting to keep the two backends in sync as
+  config knobs evolve. The parity probe is the safety net.

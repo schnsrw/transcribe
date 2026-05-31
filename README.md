@@ -9,86 +9,76 @@ by language.
 | | |
 |---|---|
 | Wire protocol | Jigasi-compatible — see [docs/PROTOCOL.md](docs/PROTOCOL.md) |
-| Backends | Voxtral · Parakeet · AI4Bharat IndicConformer · faster-whisper-turbo |
+| Backends | mlx-whisper (Mac dev) · faster-whisper (Linux + prod) · Voxtral · Parakeet · AI4Bharat IndicConformer (stubs) |
 | Languages | 13 native + 25 EU + 8 Indic + 99 fallback |
 | Code-switching | Hinglish · Tanglish · Banglish · `auto` |
 | Hallucination guards | See [docs/HALLUCINATION_GUARDS.md](docs/HALLUCINATION_GUARDS.md) |
-| Configs | `config/base.yaml` + `config/local.yaml` + `config/prod.yaml` |
-| Runtime | Docker only — no host-side Python deps required |
+| Configs | `base.yaml` + `local.yaml` (Docker dev) / `dev-mac.yaml` / `dev-linux.yaml` / `prod.yaml` |
+
+## Run matrix
+
+| Target | Where | Backend | When |
+|---|---|---|---|
+| `make dev-mac` | host (Apple Silicon) | **mlx-whisper on Metal GPU** | Daily Mac dev. ≈7× faster than Docker CPU. |
+| `make dev-linux` | host (Linux) | faster-whisper + CUDA | Linux dev box, matches prod. |
+| `make dev-docker` | containers | faster-whisper CPU | Cross-platform / CI. Slow on Mac. |
+| `make test` | containers | (mocks) | Unit + integration suite. |
+| `make prod` | containers (Linux + CUDA) | faster-whisper | Production. JWT enforced. |
+
+`make help` lists targets. `make clean` wipes the host venvs (`.venv-mac/`
+and `.venv-linux/`); Docker volumes are untouched.
+
+## Quickstart on a Mac
+
+```bash
+make dev-mac
+# First run installs deps + downloads whisper-large-v3-turbo MLX
+# checkpoint (~1.6 GB) into the Hugging Face cache. ~5 min.
+# Subsequent runs start in seconds.
+```
+
+Then open **http://localhost:8100** in Chrome (the demo's served via
+nginx separately — `make dev-docker` brings up the demo container on
+:8180; on Mac dev you serve the demo dir yourself or hit the API
+directly from the browser).
+
+## Quickstart with Docker (works everywhere)
+
+```bash
+make dev-docker     # API on :8000, demo on :8080
+make stop           # tear down, keep the model cache
+```
+
+The first build downloads whisper-small (~500 MB) into the
+`casual-sst-hf-cache` named volume.
 
 ## Docs
 
 - **[CLAUDE.md](CLAUDE.md)** — orientation, invariants, conventions
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — system overview + diagrams
 - **[docs/CODEGRAPH.md](docs/CODEGRAPH.md)** — module map + dependency graph
-- **[docs/DECISIONS.md](docs/DECISIONS.md)** — ADRs (why we picked what we picked)
+- **[docs/DECISIONS.md](docs/DECISIONS.md)** — ADRs, including ADR-013 (dual-runtime decision)
 - **[docs/PROTOCOL.md](docs/PROTOCOL.md)** — wire format spec
-- **[docs/HALLUCINATION_GUARDS.md](docs/HALLUCINATION_GUARDS.md)** — Whisper-turbo hardening stack
+- **[docs/HALLUCINATION_GUARDS.md](docs/HALLUCINATION_GUARDS.md)** — Whisper hardening stack
+- **[tests/live/README.md](tests/live/README.md)** — live test harness
 
-## Quickstart — Docker (recommended)
-
-The whole stack runs in containers so nothing leaks onto the host.
-
-```bash
-# Build + run API (port 8000) and the demo (port 8080).
-docker compose -f compose.dev.yaml up --build
-```
-
-Then open **http://localhost:8080** in Chrome and click *Transcribe*.
+## Tests
 
 ```bash
-# Stop, keep the model cache for next run:
-docker compose -f compose.dev.yaml down
-
-# Wipe everything including the Hugging Face cache:
-docker compose -f compose.dev.yaml down -v
+make test           # unit + integration in Docker
 ```
 
-The first `up` downloads the Whisper model (small, ~500 MB) into the
-`casual-sst-hf-cache` named volume. Subsequent starts reuse it.
-
-## Tests — Docker
-
-```bash
-# Unit + integration suite, isolated in the same image as the service:
-docker compose -f compose.test.yaml run --rm tests
-
-# Filter:
-docker compose -f compose.test.yaml run --rm tests pytest -k cut_mark -v
-```
-
-E2E (Playwright) runs on the host against the dockerized server:
-
-```bash
-docker compose -f compose.dev.yaml up -d
-cd tests/e2e && npm install && npx playwright test
-```
+E2E (Playwright) — see [tests/e2e/README.md](tests/e2e/README.md).
+Live case suite — see [tests/live/README.md](tests/live/README.md).
+Mac↔Docker parity check — `tests/live/probes/parity.py`.
 
 ## Production
 
 ```bash
-CONFIG_PATH=/app/config/prod.yaml \
-  docker compose -f compose.dev.yaml up --build casual-sst
+make prod
 ```
 
-Prod config expects:
-- JWT auth enforced (`bypass_auth: false`)
-- CUDA device available (override the base image to `nvidia/cuda:12.x-...`
-  if you don't already)
-- All four backends loaded
-
-See [docs/ARCHITECTURE.md#failure-modes--how-we-handle-them](docs/ARCHITECTURE.md).
-
-## Host-side dev (optional, not recommended)
-
-If you really want to run without Docker:
-
-```bash
-poetry install
-poetry run uvicorn casual_sst.main:app --host 0.0.0.0 --port 8000
-```
-
-You'll need ffmpeg < 7 in `PATH` and Python 3.11.
+Expects: JWT enforced, CUDA available, `prod.yaml` mounted.
 
 ## License
 

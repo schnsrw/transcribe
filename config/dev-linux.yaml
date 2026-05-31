@@ -1,0 +1,63 @@
+# Casual-SST — Linux host-mode dev config
+# ----------------------------------------------------------------------------
+# Activated by `make dev-linux` via scripts/dev-linux.sh. Runs uvicorn
+# against a host-side .venv-linux/ with faster-whisper. If a CUDA GPU
+# is present (nvidia-smi succeeds), the backend uses it; otherwise it
+# falls back to CPU.
+#
+# This is the closest dev parity to production (same backend, same
+# weights, same kernels). Most contributors will use either dev-mac
+# (Apple laptop) or dev-docker (cross-platform); this one is for
+# Linux workstations with NVIDIA GPUs.
+# ----------------------------------------------------------------------------
+
+extends: base.yaml
+
+server:
+  bypass_auth: true
+  port: 8100
+
+# Use the same routing as prod — every language → whisper_turbo backend.
+# (Base routes all → voxtral/parakeet/indic — but those stay stubbed
+# until model weights and runtime are wired. For now everything goes
+# through whisper_turbo which is what prod uses too.)
+routes:
+  en: whisper_turbo
+  hi: whisper_turbo
+  zh: whisper_turbo
+  ar: whisper_turbo
+  fr: whisper_turbo
+  de: whisper_turbo
+  es: whisper_turbo
+  it: whisper_turbo
+  ja: whisper_turbo
+  ko: whisper_turbo
+  nl: whisper_turbo
+  pt: whisper_turbo
+  ru: whisper_turbo
+  ta: whisper_turbo
+  bn: whisper_turbo
+  mr: whisper_turbo
+  te: whisper_turbo
+  pa: whisper_turbo
+  gu: whisper_turbo
+  kn: whisper_turbo
+  ml: whisper_turbo
+  hinglish: whisper_turbo
+  hi-en: whisper_turbo
+  ta-en: whisper_turbo
+  bn-en: whisper_turbo
+  auto: whisper_turbo
+  "*": whisper_turbo
+
+lid:
+  device: auto                 # cuda if present, else cpu
+
+backends:
+  whisper_turbo:
+    # `device: auto` → faster-whisper uses CUDA when available, falls
+    # back to CPU. compute_type defaults to int8_float16 for CUDA, int8
+    # for CPU — see backends/whisper_turbo.py.
+    device: auto
+    compute_type: int8_float16
+    model: large-v3-turbo
