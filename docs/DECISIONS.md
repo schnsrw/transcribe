@@ -447,6 +447,111 @@ doesn't shrink with audio length. This is **not** model loading
 - `dev-docker`: when you need realistic 1 s-chunk streaming in Hindi /
   other non-English languages.
 - `prod`: faster-whisper on CUDA, no per-call overhead issues.
-- Future: evaluate **pywhispercpp + Metal** as an alternative MLX
-  backend on Mac — different runtime, may not exhibit the same per-call
-  overhead.
+- `dev-mac-cpp` (whisper.cpp + Metal): now wired but with known
+  word-boundary issues on short chunks. Keeps the model resident
+  across calls so the per-call MLX overhead doesn't apply, but
+  whisper.cpp's DTW reconstruction has separate accuracy quirks.
+
+---
+
+## ADR-014 — Admin / monitoring portal + Prometheus
+
+**Status:** Accepted (2026-06-01)
+
+**Context.** Skynet ships Prometheus on port 8001 plus a couple of
+operator-facing scripts. Casual-SST needed equivalent operator visibility
+— uptime, active meetings, recent transcripts, per-backend latency
+histograms, current config — without bolting on a separate sidecar.
+
+**Decision.** Two complementary surfaces:
+
+1. **`/admin/*` JSON API + HTML dashboard** — interactive operator
+   tool. Token-gated via the `ADMIN_TOKEN` env var (missing token →
+   every route returns 404, portal effectively disabled). Endpoints
+   expose status, active-meeting drill-down, log tail, resolved
+   config, and a reset-counters button. Dashboard polls every 2 s.
+2. **`/metrics`** — Prometheus exposition. Always on,
+   unauthenticated. Counters only (no PII). Gate behind a reverse
+   proxy if you don't want it public.
+
+In-process metrics live in a single `Metrics` singleton mutated by
+the meeting/participant hooks. Log capture is via an in-memory ring
+buffer handler on the root logger (last 2000 lines).
+
+**Considered and rejected.**
+- `prometheus_client` library — small win, real cost (runtime image
+  grew). Plain-text exposition is 30 lines.
+- Real auth (OAuth) for `/admin` — out of scope for a local-ops tool.
+  Put real auth on the reverse proxy.
+
+**Consequences.**
+- Operators get a usable dashboard without bringing up Grafana.
+- Anyone with read-network-access to `/metrics` can see counts (not
+  text). That's the right default for transcription metrics.
+
+---
+
+## ADR-015 — JWT auth: ASAP-first, HMAC fallback
+
+**Status:** Accepted (2026-06-01)
+
+**Context.** Production must enforce JWT on `/ws/{meeting_id}` —
+Skynet's production deployments use Jitsi-style ASAP (asymmetric JWT
+with `kid` pointing at a PEM file). Smaller deployments want HMAC.
+
+**Decision.** `casual_sst.auth.JWTValidator` tries the two modes in
+order:
+
+1. **ASAP** (Jitsi-compatible). PEM keys discovered in
+   `ASAP_PUB_KEYS_FOLDER` keyed by `kid`. Audience must appear in
+   `ASAP_PUB_KEYS_AUDS`. Algorithms accepted: RS256/RS512/ES256/ES384.
+2. **HMAC** fallback. `JWT_SECRET` + `JWT_ALGORITHM` (default HS256)
+   + optional `JWT_AUDIENCE`.
+
+If `bypass_auth=false` and *neither* set of env vars is configured,
+the validator raises at first request — misconfigured prod fails
+loudly, not silently. Dev stacks (`bypass_auth=true`, the default in
+`local.yaml`/`dev-mac.yaml`/`dev-linux.yaml`) never instantiate the
+validator and never need PyJWT-the-import to even succeed.
+
+**Consequences.**
+- One-line drop-in for Jitsi shops that already issue ASAP tokens.
+- Trivial HMAC mode for smaller deployments.
+- `PyJWT[crypto]` is added to Dockerfile + Dockerfile.cuda + both
+  host venv scripts.
+
+---
+
+## ADR-016 — Optional LLM summarisation module
+
+**Status:** Accepted (2026-06-01)
+
+**Context.** Skynet bundles summaries + action items via vLLM /
+Ollama / OCI. Casual-SST scoped that out originally to stay focused
+on transcription, but users want a "one endpoint to summarise a
+finalized transcript" path without standing up the whole Skynet
+stack.
+
+**Decision.** Single endpoint `POST /api/summarize` that takes a
+transcript and returns `{summary, action_items}`. Pluggable LLM via
+the `LLM_BACKEND` env var:
+
+- `openai` — any OpenAI-format `/chat/completions` endpoint (OpenAI,
+  LM Studio, vLLM with the openai-compat shim, llama.cpp's
+  api-server, Groq, Fireworks, Together, …). Talk via httpx, not the
+  official SDKs — keeps the image lean.
+- `ollama` — Ollama's native chat API.
+
+Off when `LLM_BACKEND` is unset — `/api/summarize` returns 503,
+`/api/summarize/health` reports `configured: false`. The route
+always exists so OpenAPI docs show it.
+
+**Considered and rejected.**
+- Sticky per-meeting summaries with state. Out of scope; users with
+  CRM-like needs can build on top of the stateless endpoint.
+- Multiple endpoints for summary vs action-items. One LLM call is
+  cheaper; the response is small JSON.
+
+**Consequences.**
+- httpx added to the runtime image (≈300 KB).
+- Easy to point at any local or hosted LLM without code changes.

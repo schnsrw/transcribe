@@ -65,6 +65,8 @@ pip install --quiet \
     "silero-vad>=5,<6" \
     "faster-whisper>=1.1,<2" \
     "uuid6>=2024.7.10" \
+    "PyJWT[crypto]>=2.8" \
+    "httpx>=0.27" \
     "mlx-whisper>=0.4.1" \
     "pywhispercpp>=1.4.0"
 

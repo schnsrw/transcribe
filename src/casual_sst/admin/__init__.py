@@ -22,3 +22,4 @@ team. Plug a real auth proxy in front if you expose it publicly.
 from .api import router as admin_router  # noqa: F401
 from .metrics import METRICS  # noqa: F401
 from .logs import install_log_handler  # noqa: F401
+from .prom import router as prom_router  # noqa: F401

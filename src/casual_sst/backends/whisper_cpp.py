@@ -19,13 +19,23 @@ Production parity:
     Devanagari preserved identically.
   * Word-level timestamps via ``token_timestamps + max_len=1 +
     split_on_word=True``. Time units are 10 ms (whisper.cpp's "cs"
-    unit); we convert to seconds.
+    unit); we convert to seconds. Each word is emitted with a leading
+    space so the participant pipeline's ``"".join`` reconstruction
+    matches the other Whisper backends.
   * `condition_on_previous_text` is hard-coded False (invariant #2).
   * Per-word probability is **not exposed** by pywhispercpp's high-level
     API. We synthesise a per-result confidence from the global
     ``no_speech_prob`` — best available signal short of dropping to
     the C-bindings. Cut-mark only consumes the *average* over the
     finalized phrase, so this loss is bounded.
+
+Known limitation (chunk-handoff, STREAM mode):
+  whisper.cpp's word-timestamp DTW is sensitive to short audio. With
+  1 s chunks the per-word boundaries drift enough that cut-mark's
+  ``trim_buffer`` sometimes throws away mid-syllable audio, leading
+  to garbled subsequent emits (e.g. "transcription system" → "descrip-
+  tionsystem"). Use the mlx-whisper backend (config/dev-mac.yaml) for
+  Mac streaming dev until this is tuned — see ADR-013.
 
 Install
 -------
@@ -124,6 +134,14 @@ class WhisperCppBackend(ChunkedBackend):
 
         # Convert pywhispercpp Segment → Word.
         # `t0` / `t1` are in 10 ms units (whisper.cpp "cs").
+        #
+        # Convention match: faster-whisper emits each word with a
+        # leading space (" quick", " brown", ...). The upstream
+        # pipeline does ``"".join(w.text for w in words).strip()`` to
+        # reconstruct phrases, so we MUST emit the same shape or the
+        # joined text comes out as "Thequickbrownfox". whisper.cpp's
+        # split-on-word mode strips the leading space, so we add it
+        # back here.
         words: list[Word] = []
         for seg in segments:
             text = (seg.text or "").strip()
@@ -132,17 +150,18 @@ class WhisperCppBackend(ChunkedBackend):
             start_s = float(getattr(seg, "t0", 0)) / 100.0
             end_s = float(getattr(seg, "t1", 0)) / 100.0
             # pywhispercpp 1.4.x doesn't expose token probabilities
-            # on the high-level Segment object; use no_speech_prob as
-            # a coarse proxy when available, else assume reasonable
-            # confidence. Cut-mark averages over words so a constant
-            # value is acceptable here.
+            # on the high-level Segment object. Use no_speech_prob as
+            # a coarse proxy when available, else 0.8 — cut-mark
+            # averages over words so a constant value is acceptable.
             prob = float(getattr(seg, "p", 0.0)) or 0.8
-            words.append(Word(text=text, start_s=start_s, end_s=end_s, prob=prob))
+            # Leading-space convention (matches faster-whisper).
+            spaced = (" " + text) if words else text
+            words.append(Word(text=spaced, start_s=start_s, end_s=end_s, prob=prob))
 
         if not words:
             return ASRResult(text="", words=[], language=(language or ""), confidence=0.0)
 
-        full_text = " ".join(w.text for w in words).strip()
+        full_text = "".join(w.text for w in words).strip()
         confidence = sum(w.prob for w in words) / len(words)
         return ASRResult(
             text=full_text,

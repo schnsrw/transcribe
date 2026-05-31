@@ -48,7 +48,9 @@ pip install --quiet \
     "numpy>=1.26,<2" \
     "silero-vad>=5,<6" \
     "faster-whisper>=1.1,<2" \
-    "uuid6>=2024.7.10"
+    "uuid6>=2024.7.10" \
+    "PyJWT[crypto]>=2.8" \
+    "httpx>=0.27"
 
 # CUDA detection — informational only; faster-whisper's `device: auto`
 # does the actual probing.

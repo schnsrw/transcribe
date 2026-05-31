@@ -24,8 +24,10 @@ import os
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
-from .admin import METRICS, admin_router, install_log_handler
+from .admin import METRICS, admin_router, install_log_handler, prom_router
+from .auth import AuthError, get_validator
 from .frame import DISCONNECT_BYTE
+from .llm import llm_router
 from .meeting import MeetingConnection
 from .router import Router, load_config
 
@@ -48,6 +50,12 @@ app = FastAPI(title="Casual-SST")
 # Admin / monitoring portal. The router itself returns 404 for every
 # route when ADMIN_TOKEN is unset, so this is a safe no-op by default.
 app.include_router(admin_router)
+# Prometheus /metrics endpoint — always on, unauthenticated (counters
+# only, no PII; gate behind a reverse proxy if you don't want public).
+app.include_router(prom_router)
+# Optional LLM /api/summarize. Returns 503 if LLM_BACKEND is unset, so
+# the endpoint always exists but is inert by default.
+app.include_router(llm_router)
 
 # Active meetings, keyed by meeting_id. Used by the idle-flush loop to
 # walk every connection at 1 Hz and finalize short utterances. Cleared on
@@ -76,8 +84,17 @@ async def ws_endpoint(
       * single ``\\x00`` byte = graceful disconnect
       * server emits JSON ``TranscriptionEvent`` records over the same WS
     """
-    # TODO: JWT validation here when cfg["server"]["bypass_auth"] is False.
-    # ADR-001 keeps the auth_token query-param shape Skynet-compatible.
+    # JWT validation when auth is enforced. Token is passed as query
+    # param `auth_token=...` per ADR-001 (Skynet-compatible). Failures
+    # close the socket with code 1008 (policy violation) before any
+    # frame is read.
+    if not cfg["server"].get("bypass_auth", True):
+        try:
+            get_validator().validate(auth_token)
+        except AuthError as e:
+            log.warning("ws auth rejected for %s: %s", meeting_id, e)
+            await websocket.close(code=1008, reason=str(e))
+            return
     await websocket.accept()
     conn = MeetingConnection(ws=websocket, meeting_id=meeting_id, cfg=cfg, router=router)
     _meetings[meeting_id] = conn
