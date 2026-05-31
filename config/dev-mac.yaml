@@ -57,9 +57,12 @@ backends:
   mlx_whisper:
     kind: chunked
     module: casual_sst.backends.mlx_whisper:MLXWhisperBackend
-    # mlx-community pre-converts OpenAI weights to MLX format. Pick the
-    # quantised checkpoint if 16 GB RAM gets tight; turbo fp16 is ~1.6 GB.
-    path_or_hf_repo: mlx-community/whisper-large-v3-turbo
+    # 4-bit quantised turbo: same OpenAI weights, ~half the memory and
+    # noticeably faster on M4 base (10 GPU cores). Accuracy delta vs
+    # fp16 is < 1 WER point in published benchmarks. Switch to the
+    # unquantised "mlx-community/whisper-large-v3-turbo" if you find
+    # quality regressions on your audio.
+    path_or_hf_repo: mlx-community/whisper-large-v3-turbo-q4
     beam_size: 1
     # Hallucination guards — match production exactly.
     no_speech_threshold: 0.85

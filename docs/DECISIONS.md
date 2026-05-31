@@ -418,3 +418,21 @@ Both backends:
   and the contract is enforced by the protocol type.
 - New regression risk: forgetting to keep the two backends in sync as
   config knobs evolve. The parity probe is the safety net.
+
+**Measured perf (M4 base, whisper-large-v3-turbo-q4, 5 s pangram, warm
+model):**
+
+| Mode | First event | Total | Verdict |
+|---|---|---|---|
+| WHOLE-FILE (one frame) | **2.8 s** | 6.1 s | Fast — ≈2× faster than Docker CPU. Good for pipeline iteration. |
+| STREAM-1s-paced (5 frames) | 23.5 s | 44.9 s | **Slow** — per-call MLX overhead doesn't amortize on M4 base (10 GPU cores). Worse than Docker for streaming sim. |
+
+The streaming gap is mostly Metal kernel JIT/launch overhead per
+`mlx_whisper.transcribe()` call, which doesn't scale down with audio
+length. M4 Pro / Max (more GPU cores) will narrow this.
+
+**Practical guidance:** use `dev-mac` for pipeline iteration with
+WHOLE-FILE submissions (the `compare.py` probe in WHOLE mode, or
+ad-hoc curl/wscat). For realistic streaming behaviour reproduce on
+`dev-docker` — the per-call overhead profile matches prod's chunked
+faster-whisper path much more closely.

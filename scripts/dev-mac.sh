@@ -83,7 +83,18 @@ echo ""
 # uvicorn 0.31's bundled `websockets` legacy impl is incompatible with
 # `websockets` library ≥ 14. We install `wsproto` above and pin uvicorn
 # to use it — works with any websockets version.
+#
+# `--reload` is OFF by default because it tears down the loaded MLX
+# model on every file change, which adds 5-10 s of Metal-kernel warm-up
+# to the next request. Set RELOAD=1 to enable it while iterating on
+# server code.
+RELOAD_ARGS=()
+if [ "${RELOAD:-0}" = "1" ]; then
+    RELOAD_ARGS+=(--reload --reload-dir src)
+    echo "[dev-mac] --reload enabled (will reload on src/ changes)"
+fi
+
 exec uvicorn casual_sst.main:app \
     --host 0.0.0.0 --port "$PORT" \
     --ws wsproto \
-    --reload --reload-dir src
+    "${RELOAD_ARGS[@]}"

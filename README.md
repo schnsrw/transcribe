@@ -32,15 +32,23 @@ and `.venv-linux/`); Docker volumes are untouched.
 
 ```bash
 make dev-mac
-# First run installs deps + downloads whisper-large-v3-turbo MLX
-# checkpoint (~1.6 GB) into the Hugging Face cache. ~5 min.
+# First run installs deps + downloads whisper-large-v3-turbo-q4 MLX
+# checkpoint (~800 MB) into the Hugging Face cache. ~5 min.
 # Subsequent runs start in seconds.
 ```
 
-Then open **http://localhost:8100** in Chrome (the demo's served via
-nginx separately — `make dev-docker` brings up the demo container on
-:8180; on Mac dev you serve the demo dir yourself or hit the API
-directly from the browser).
+Then point a client at `ws://localhost:8100/ws/<meeting_id>`. The
+browser demo is served by the `make dev-docker` stack on `:8180` —
+you can run both at the same time and just set the demo's WS host
+input to `ws://localhost:8100/ws`.
+
+**Measured perf** (M4 base, whisper-large-v3-turbo-q4, 5 s audio,
+warm model): WHOLE-FILE ≈ 2.8 s first event, STREAM-1s-paced ≈ 24 s.
+Mac mode is faster for batch / WHOLE-FILE iteration; streaming on
+M4 base has per-call MLX overhead that doesn't amortize, so for
+real Jigasi-style 1 s-chunk simulation use `make dev-docker`. See
+[docs/DECISIONS.md#adr-013](docs/DECISIONS.md) for measurements +
+rationale.
 
 ## Quickstart with Docker (works everywhere)
 
