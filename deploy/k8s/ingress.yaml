@@ -1,0 +1,39 @@
+# Optional ingress fronting Casual-SST. This example uses nginx-ingress
+# with the annotations needed for long-lived WebSocket connections.
+# Delete the file if you're not using ingress, or rewrite for your
+# preferred controller (Traefik, HAProxy, AWS ALB, etc.).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: casual-sst
+  namespace: casual-sst
+  annotations:
+    # WS keep-alive — Jigasi meetings can run for hours.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "7200"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "7200"
+    # Sticky sessions so the same WS lands on the same pod.
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/affinity-mode: "persistent"
+    nginx.ingress.kubernetes.io/session-cookie-name: "casual-sst-pod"
+    # Disable buffering for low-latency streaming responses.
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - casual-sst.example.com
+      secretName: casual-sst-tls
+  rules:
+    - host: casual-sst.example.com
+      http:
+        paths:
+          # Lock down /metrics and /admin/* to your monitoring subnet
+          # at the LB level instead of (or in addition to) using the
+          # service's built-in token auth.
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: casual-sst
+                port:
+                  number: 8000

@@ -20,11 +20,12 @@ it in every fetch.
 
 from __future__ import annotations
 
+import base64
 import os
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, status
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 
 from .logs import LOG_BUFFER
 from .metrics import METRICS
@@ -44,15 +45,46 @@ def _check_admin(token: str | None) -> None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "bad admin token")
 
 
+def _check_basic_auth(authorization: str | None) -> bool:
+    """HTTP Basic Auth: username ignored, password must equal ADMIN_TOKEN.
+
+    Returns True iff the header carries valid credentials.
+    """
+    if not authorization or not authorization.lower().startswith("basic "):
+        return False
+    try:
+        raw = base64.b64decode(authorization.split(None, 1)[1]).decode("utf-8")
+    except Exception:
+        return False
+    if ":" not in raw:
+        return False
+    _, password = raw.split(":", 1)
+    return password == ADMIN_TOKEN
+
+
 @router.get("/", response_class=HTMLResponse, include_in_schema=False)
-def portal() -> HTMLResponse:
-    """Serve the HTML dashboard (always served — token gates the data)."""
+def portal(authorization: str | None = Header(default=None)) -> Response:
+    """Serve the HTML dashboard with HTTP Basic Auth.
+
+    Browsers natively render the auth prompt — username can be
+    anything; the password is the same `ADMIN_TOKEN` the API uses.
+    Once authed the dashboard JS still includes the token in
+    `X-Admin-Token` for every API call.
+    """
     if not ADMIN_TOKEN:
         return HTMLResponse(
             "<h1>Admin portal disabled</h1>"
             "<p>Set <code>ADMIN_TOKEN=...</code> in the server's environment "
             "to enable.</p>",
             status_code=404,
+        )
+    if not _check_basic_auth(authorization):
+        # Triggers the browser's native login dialog.
+        return Response(
+            content="Auth required",
+            status_code=401,
+            headers={"WWW-Authenticate": 'Basic realm="casual-sst-admin"'},
+            media_type="text/plain",
         )
     return HTMLResponse(PORTAL_HTML)
 

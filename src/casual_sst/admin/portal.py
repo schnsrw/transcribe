@@ -116,6 +116,10 @@ PORTAL_HTML = r"""<!doctype html>
 <script>
   const $ = id => document.getElementById(id);
   const tokenInput = $('token');
+  // Auto-fill from the Basic Auth password the browser cached when
+  // it prompted for /admin/ — Basic credentials are accessible via
+  // performance entries on most modern browsers, but the simplest
+  // path is just letting the user paste once and persist in localStorage.
   tokenInput.value = localStorage.getItem('casual_admin_token') || '';
 
   $('apply').onclick = () => {

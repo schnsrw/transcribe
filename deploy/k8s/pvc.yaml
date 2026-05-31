@@ -1,0 +1,15 @@
+# Persistent Hugging Face model cache. Survives pod restarts so the
+# 1.5 GB whisper-large-v3-turbo download only happens once per node
+# (or once per replica, depending on ReadWriteOnce vs ReadWriteMany).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: casual-sst-hf-cache
+  namespace: casual-sst
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  # storageClassName: gp3        # uncomment + name your cluster's SSD class

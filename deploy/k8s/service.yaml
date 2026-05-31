@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: casual-sst
+  namespace: casual-sst
+  labels:
+    app: casual-sst
+spec:
+  type: ClusterIP
+  selector:
+    app: casual-sst
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
+  # WebSocket connections to /ws/{meeting_id} are long-lived. If your
+  # load balancer needs explicit timeouts, add the relevant annotations
+  # on the Ingress instead (see ingress.yaml).

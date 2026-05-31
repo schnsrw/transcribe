@@ -85,21 +85,27 @@ class WhisperCppBackend(ChunkedBackend):
         # Construct the model once and reuse — this is the key reason
         # whisper.cpp can stream faster than mlx-whisper. The Metal
         # kernels stay warm across calls.
+        #
+        # NOTE on chunk-handoff (the STREAM bug from before):
+        # We used to set max_len=1 + split_on_word=True to get word-
+        # level segments. The combination produced word boundaries
+        # whose timestamps drifted enough that the upstream cut-mark
+        # / trim logic could slice mid-syllable, dropping audio at
+        # chunk boundaries. We now request larger segments
+        # (max_len=0, the whisper.cpp default ≈ 30 s) and rely on
+        # whisper.cpp's `t0`/`t1` per segment plus our own pipeline
+        # VAD for word-level positioning. Trade-off documented in
+        # ADR-013.
         self._model = self._Model(
             self.model_name,
             n_threads=self.n_threads or 4,
             print_realtime=False,
             print_progress=False,
-            # Word-level timestamps: one "segment" per word.
-            token_timestamps=True,
-            max_len=1,
-            split_on_word=True,
-            # Whisper.cpp's hallucination guards.
+            token_timestamps=True,        # still useful for downstream confidence
             no_speech_thold=self.no_speech_threshold,
             logprob_thold=self.logprob_threshold,
             entropy_thold=self.compression_ratio_threshold,
-            # Hard-coded — invariant #2 in CLAUDE.md.
-            no_context=True,    # equivalent to condition_on_previous_text=False
+            no_context=True,              # = condition_on_previous_text=False
         )
 
     async def transcribe(
@@ -135,13 +141,14 @@ class WhisperCppBackend(ChunkedBackend):
         # Convert pywhispercpp Segment → Word.
         # `t0` / `t1` are in 10 ms units (whisper.cpp "cs").
         #
-        # Convention match: faster-whisper emits each word with a
-        # leading space (" quick", " brown", ...). The upstream
-        # pipeline does ``"".join(w.text for w in words).strip()`` to
-        # reconstruct phrases, so we MUST emit the same shape or the
-        # joined text comes out as "Thequickbrownfox". whisper.cpp's
-        # split-on-word mode strips the leading space, so we add it
-        # back here.
+        # We now receive full segments (not single-word segments), so
+        # each segment text is the natural Whisper phrase including
+        # punctuation and inter-word spaces. We split on whitespace
+        # to give the upstream cut-mark logic word-level granularity
+        # — the timestamps are interpolated linearly across the
+        # segment's duration. That's coarser than DTW but stable
+        # enough for the pipeline (cut-mark only needs monotonic
+        # boundaries; the trim aligns to 2048-byte multiples anyway).
         words: list[Word] = []
         for seg in segments:
             text = (seg.text or "").strip()
@@ -149,14 +156,20 @@ class WhisperCppBackend(ChunkedBackend):
                 continue
             start_s = float(getattr(seg, "t0", 0)) / 100.0
             end_s = float(getattr(seg, "t1", 0)) / 100.0
-            # pywhispercpp 1.4.x doesn't expose token probabilities
-            # on the high-level Segment object. Use no_speech_prob as
-            # a coarse proxy when available, else 0.8 — cut-mark
-            # averages over words so a constant value is acceptable.
-            prob = float(getattr(seg, "p", 0.0)) or 0.8
-            # Leading-space convention (matches faster-whisper).
-            spaced = (" " + text) if words else text
-            words.append(Word(text=spaced, start_s=start_s, end_s=end_s, prob=prob))
+            # Split into individual words and linearly interpolate
+            # timestamps. Conserves leading-space convention.
+            tokens = text.split()
+            if not tokens:
+                continue
+            step = (end_s - start_s) / max(len(tokens), 1)
+            for i, tok in enumerate(tokens):
+                w_start = start_s + i * step
+                w_end = start_s + (i + 1) * step
+                spaced = (" " + tok) if (words or i > 0) else tok
+                # pywhispercpp 1.4.x doesn't expose per-token probs
+                # at the high-level Segment object — use 0.8 as a
+                # reasonable constant. Cut-mark averages over words.
+                words.append(Word(text=spaced, start_s=w_start, end_s=w_end, prob=0.8))
 
         if not words:
             return ASRResult(text="", words=[], language=(language or ""), confidence=0.0)

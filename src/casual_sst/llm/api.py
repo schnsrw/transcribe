@@ -11,10 +11,11 @@ from __future__ import annotations
 import json
 import logging
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from .backends import select_llm
+from .ratelimit import LIMITER
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["llm"])
@@ -41,12 +42,25 @@ class SummarizeResponse(BaseModel):
 
 
 @router.post("/summarize", response_model=SummarizeResponse)
-async def summarize(req: SummarizeRequest) -> SummarizeResponse:
+async def summarize(req: SummarizeRequest, request: Request) -> SummarizeResponse:
     """Summarize a transcript into bullet points + action items.
 
     Returns 503 if no LLM backend is configured (LLM_BACKEND env var
     unset or pointed at a backend whose credentials are missing).
+    Returns 429 if the caller's IP has exceeded the per-IP rate limit
+    (default 20 req/min, configurable via LLM_RATE_LIMIT_RPM env).
     """
+    # Per-IP token bucket. Behind a proxy this is the proxy IP — make
+    # sure you trust X-Forwarded-For before relying on it here.
+    client_ip = (request.client.host if request.client else "unknown")
+    if not LIMITER.allow(client_ip):
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Rate limit exceeded. Tune via LLM_RATE_LIMIT_RPM / "
+            "LLM_RATE_LIMIT_BURST env vars or put a proper API gateway "
+            "in front of this endpoint.",
+        )
+
     llm = select_llm()
     if llm is None:
         raise HTTPException(

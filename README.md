@@ -73,6 +73,10 @@ The first build downloads whisper-small (~500 MB) into the
 
 - **[docs/SETUP.md](docs/SETUP.md)** — **setup guide for Mac dev / Linux dev / Docker / production**
 - **[docs/DOCKER_GPU.md](docs/DOCKER_GPU.md)** — Docker + NVIDIA GPU on Linux (driver, toolkit, troubleshooting)
+- **[deploy/k8s/README.md](deploy/k8s/README.md)** — Kubernetes deployment manifests
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — how to contribute
+- **[SECURITY.md](SECURITY.md)** — threat model + how to report vulnerabilities
+- **[CHANGELOG.md](CHANGELOG.md)** — release history
 - **[CLAUDE.md](CLAUDE.md)** — orientation, invariants, conventions
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — system overview + diagrams
 - **[docs/CODEGRAPH.md](docs/CODEGRAPH.md)** — module map + dependency graph
