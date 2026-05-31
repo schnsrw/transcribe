@@ -1,0 +1,174 @@
+# Casual-SST — release pipeline.
+# ----------------------------------------------------------------------------
+# Triggers on:
+#   * git tag matching v*  (e.g. v0.2.0, v1.0.0, v1.0.0-rc1)
+#   * manual workflow_dispatch (for testing the publish path)
+#
+# Stages:
+#   1. test      — run pytest in the same image we'll ship. Hard gate;
+#                  any failure stops the pipeline.
+#   2. cpu-image — build linux/amd64 + linux/arm64 from Dockerfile,
+#                  push to Docker Hub with semver tags + `latest`.
+#   3. cuda-image — build linux/amd64 from Dockerfile.cuda, push with
+#                   `cuda-*` tags. (CUDA base image is amd64-only.)
+#
+# Required GitHub repository configuration:
+#
+#   Variables (Settings → Secrets and variables → Actions → Variables):
+#     DOCKERHUB_USERNAME       — Docker Hub user / org
+#     DOCKERHUB_REPO           — image name (default: casual-sst)
+#
+#   Secrets:
+#     DOCKERHUB_TOKEN          — Docker Hub access token with
+#                                read+write permission on the repo
+#
+# How to cut a release:
+#   git tag -a v0.2.0 -m "v0.2.0"
+#   git push origin v0.2.0
+#
+# Resulting images (assuming user=schnsrw, repo=casual-sst, tag=v0.2.0):
+#   docker pull schnsrw/casual-sst:0.2.0
+#   docker pull schnsrw/casual-sst:0.2
+#   docker pull schnsrw/casual-sst:latest
+#   docker pull schnsrw/casual-sst:cuda-0.2.0
+#   docker pull schnsrw/casual-sst:cuda-0.2
+#   docker pull schnsrw/casual-sst:cuda-latest
+# ----------------------------------------------------------------------------
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Manual override version (without leading v, e.g. 0.2.0-test)"
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+  DOCKERHUB_REPO: ${{ vars.DOCKERHUB_REPO || 'casual-sst' }}
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────
+  # Stage 1: gate the release on a clean test run.
+  # ──────────────────────────────────────────────────────────────────────
+  test:
+    name: pytest (release gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build test image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          tags: casual-sst:dev
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: pytest
+        run: docker compose -f compose.test.yaml run --rm tests
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Stage 2: CPU image, multi-arch.
+  # ──────────────────────────────────────────────────────────────────────
+  cpu-image:
+    name: build + push CPU (linux/amd64,arm64)
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU (for cross-arch builds)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Generate image tags + labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKERHUB_USERNAME }}/${{ env.DOCKERHUB_REPO }}
+          tags: |
+            # On tag push v1.2.3 → produces tags 1.2.3, 1.2, 1, latest.
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            # Manual dispatch: use the inputs.tag verbatim.
+            type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
+
+      - name: Build + push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=cpu
+          cache-to: type=gha,scope=cpu,mode=max
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Stage 3: CUDA image, amd64 only.
+  # ──────────────────────────────────────────────────────────────────────
+  cuda-image:
+    name: build + push CUDA (linux/amd64)
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 60       # CUDA base + apt + pip dance is slow.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Generate CUDA image tags
+        id: meta-cuda
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKERHUB_USERNAME }}/${{ env.DOCKERHUB_REPO }}
+          flavor: |
+            # Adds the "cuda-" prefix to every generated tag so the
+            # CUDA images coexist with the CPU images under the same repo.
+            prefix=cuda-,onlatest=true
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
+
+      - name: Build + push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.cuda
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta-cuda.outputs.tags }}
+          labels: ${{ steps.meta-cuda.outputs.labels }}
+          cache-from: type=gha,scope=cuda
+          cache-to: type=gha,scope=cuda,mode=max

@@ -555,3 +555,51 @@ always exists so OpenAPI docs show it.
 **Consequences.**
 - httpx added to the runtime image (≈300 KB).
 - Easy to point at any local or hosted LLM without code changes.
+
+---
+
+## ADR-017 — CI on every push, Docker Hub publish only on `v*` tags
+
+**Status:** Accepted (2026-06-01)
+
+**Context.** Two related but distinct requirements: (1) prevent
+broken code from landing on `main` by running tests automatically,
+and (2) avoid spamming Docker Hub with one image per commit while
+still making it trivial to publish a release.
+
+**Decision.** Two GitHub Actions workflows:
+
+  * `.github/workflows/ci.yml` — triggers on push to `main` and on
+    every PR. Builds the same Docker image we ship and runs the
+    pytest suite inside it via `compose.test.yaml`. No artefacts.
+  * `.github/workflows/release.yml` — triggers on tag push matching
+    `v*` (or manual `workflow_dispatch`). Three sequential jobs:
+      1. `test` — release gate. Identical pytest run; failure
+         aborts publication.
+      2. `cpu-image` — `docker buildx` `linux/amd64,linux/arm64` from
+         `Dockerfile`, push to Docker Hub with semver tags
+         (`0.2.0`, `0.2`, `0`) + `latest`.
+      3. `cuda-image` — `linux/amd64` from `Dockerfile.cuda`, push
+         with `cuda-` prefix on every tag (`cuda-0.2.0`,
+         `cuda-latest`, etc.).
+
+`docker/metadata-action@v5` generates tags; `docker/build-push-action@v6`
+publishes with GHA cache (`type=gha,scope=cpu` / `scope=cuda`) so
+incremental tag pushes are fast.
+
+**Considered and rejected.**
+- Publishing every push to `main` with the commit SHA. Pollutes
+  Docker Hub and confuses pinning.
+- A single workflow file with conditional jobs. Less readable than
+  two files with clear-cut triggers.
+- Using `:latest` from every release branch. We only publish from
+  semver tags; branches don't produce images.
+
+**Consequences.**
+- Operators can `docker pull schnsrw/casual-sst:0.2.0` for an
+  immutable artefact, or `:latest` for "newest release".
+- A bad tag breaks the published `:latest` until rolled forward —
+  document a tag-then-release-notes flow if that becomes an issue.
+- Required GitHub config: `vars.DOCKERHUB_USERNAME`,
+  `vars.DOCKERHUB_REPO` (optional, defaults to `casual-sst`),
+  `secrets.DOCKERHUB_TOKEN`.

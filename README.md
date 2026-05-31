@@ -95,6 +95,43 @@ make prod
 
 Expects: JWT enforced, CUDA available, `prod.yaml` mounted.
 
+Pull the prebuilt image from Docker Hub instead of building locally:
+
+```bash
+docker pull schnsrw/casual-sst:cuda-latest
+# or pin a specific version
+docker pull schnsrw/casual-sst:cuda-0.2.0
+```
+
+The CPU image is also published — useful for non-GPU servers:
+
+```bash
+docker pull schnsrw/casual-sst:latest          # CPU, multi-arch (amd64+arm64)
+docker pull schnsrw/casual-sst:0.2.0           # CPU, pinned
+```
+
+## Releasing
+
+Push a semver tag to trigger the release pipeline
+(`.github/workflows/release.yml`):
+
+```bash
+git tag -a v0.2.0 -m "v0.2.0"
+git push origin v0.2.0
+```
+
+This runs the full test suite (release gate), then builds + pushes
+both the CPU (linux/amd64 + linux/arm64) and CUDA (linux/amd64) images
+to Docker Hub with semver tags + `latest` / `cuda-latest` aliases.
+
+**One-time GitHub setup** (Settings → Secrets and variables → Actions):
+
+| Kind | Name | Value |
+|---|---|---|
+| Variable | `DOCKERHUB_USERNAME` | your Docker Hub username |
+| Variable | `DOCKERHUB_REPO` | `casual-sst` (default; override if needed) |
+| Secret | `DOCKERHUB_TOKEN` | Docker Hub access token with read+write |
+
 ## License
 
 Apache 2.0.

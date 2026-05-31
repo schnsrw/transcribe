@@ -1,0 +1,51 @@
+# Casual-SST — continuous integration.
+# ----------------------------------------------------------------------------
+# Runs on every push to main + every PR. Builds the test image and
+# executes the pytest suite inside it — same path that `make test`
+# uses locally. No artefacts are published from this workflow; that
+# is what release.yml is for.
+# ----------------------------------------------------------------------------
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: pytest (unit + integration)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Cache Docker layers across runs so the pip-install step doesn't
+      # have to redownload torch + ctranslate2 + friends every time.
+      - name: Build test image (with GHA cache)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          tags: casual-sst:dev
+          load: true                 # keep the image on the local docker daemon
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run pytest in container
+        run: |
+          docker compose -f compose.test.yaml run --rm tests
+
+      - name: Show docker images (debug)
+        if: failure()
+        run: docker images
