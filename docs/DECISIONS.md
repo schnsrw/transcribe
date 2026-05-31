@@ -419,20 +419,34 @@ Both backends:
 - New regression risk: forgetting to keep the two backends in sync as
   config knobs evolve. The parity probe is the safety net.
 
-**Measured perf (M4 base, whisper-large-v3-turbo-q4, 5 s pangram, warm
-model):**
+**Measured perf (M4 base, warm model, 5 s English pangram + 2 s Hindi):**
 
-| Mode | First event | Total | Verdict |
-|---|---|---|---|
-| WHOLE-FILE (one frame) | **2.8 s** | 6.1 s | Fast — ≈2× faster than Docker CPU. Good for pipeline iteration. |
-| STREAM-1s-paced (5 frames) | 23.5 s | 44.9 s | **Slow** — per-call MLX overhead doesn't amortize on M4 base (10 GPU cores). Worse than Docker for streaming sim. |
+| Model | Audio / mode | First event | Total | Notes |
+|---|---|---|---|---|
+| large-v3-turbo-q4 | EN whole | 2.8 s | 6 s | ≈2× faster than Docker. |
+| large-v3-turbo-q4 | EN stream (5 chunks) | 23 s | 45 s | Slower than Docker. |
+| **whisper-small-mlx** | EN whole | **0.6 s** | 1.3 s | Best on M4 base. |
+| **whisper-small-mlx** | EN stream (5 chunks) | **4.0 s** | 9.7 s | **Usable for streaming dev.** |
+| whisper-small-mlx | HI whole | 0.7 s | 2.0 s | Devanagari preserved. |
+| whisper-small-mlx | HI stream (2 chunks) | 21 s | 22 s | Hindi STREAM stays slow even warm. |
 
-The streaming gap is mostly Metal kernel JIT/launch overhead per
-`mlx_whisper.transcribe()` call, which doesn't scale down with audio
-length. M4 Pro / Max (more GPU cores) will narrow this.
+`whisper-small-mlx` is the default in `dev-mac.yaml` because it's the
+only configuration that makes streaming usable on M4 base. Switch to
+turbo-q4 if you care about WHOLE-FILE accuracy more than streaming.
 
-**Practical guidance:** use `dev-mac` for pipeline iteration with
-WHOLE-FILE submissions (the `compare.py` probe in WHOLE mode, or
-ad-hoc curl/wscat). For realistic streaming behaviour reproduce on
-`dev-docker` — the per-call overhead profile matches prod's chunked
-faster-whisper path much more closely.
+**Hindi STREAM remains slow on Mac.** The per-call MLX overhead is
+visibly larger on non-English audio — appears to be Hindi-decoder
+token-step cost combined with mlx-whisper's word-timestamp DTW which
+doesn't shrink with audio length. This is **not** model loading
+(warm runs are just as slow). Confirmed by direct measurement: same
+2 s Hindi WHOLE-FILE takes 0.7 s, 1 s × 2 chunks takes 21 s.
+
+**Practical guidance:**
+- `dev-mac` with small: best for English STREAM + multilingual WHOLE-FILE
+  pipeline iteration.
+- `dev-docker`: when you need realistic 1 s-chunk streaming in Hindi /
+  other non-English languages.
+- `prod`: faster-whisper on CUDA, no per-call overhead issues.
+- Future: evaluate **pywhispercpp + Metal** as an alternative MLX
+  backend on Mac — different runtime, may not exhibit the same per-call
+  overhead.

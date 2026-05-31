@@ -57,12 +57,13 @@ backends:
   mlx_whisper:
     kind: chunked
     module: casual_sst.backends.mlx_whisper:MLXWhisperBackend
-    # 4-bit quantised turbo: same OpenAI weights, ~half the memory and
-    # noticeably faster on M4 base (10 GPU cores). Accuracy delta vs
-    # fp16 is < 1 WER point in published benchmarks. Switch to the
-    # unquantised "mlx-community/whisper-large-v3-turbo" if you find
-    # quality regressions on your audio.
-    path_or_hf_repo: mlx-community/whisper-large-v3-turbo-q4
+    # whisper-small (244M params, multilingual) is the streaming-
+    # friendly default on M4 base. Turbo-q4 is ~3× more accurate but
+    # has per-call MLX overhead that doesn't amortize at 1 s chunks —
+    # measured ~45 s to drain a 5 s clip in STREAM mode vs ~6 s for
+    # small. Switch to "mlx-community/whisper-large-v3-turbo-q4" for
+    # WHOLE-FILE / batch testing where the throughput matters.
+    path_or_hf_repo: mlx-community/whisper-small-mlx
     beam_size: 1
     # Hallucination guards — match production exactly.
     no_speech_threshold: 0.85

@@ -42,13 +42,20 @@ browser demo is served by the `make dev-docker` stack on `:8180` —
 you can run both at the same time and just set the demo's WS host
 input to `ws://localhost:8100/ws`.
 
-**Measured perf** (M4 base, whisper-large-v3-turbo-q4, 5 s audio,
-warm model): WHOLE-FILE ≈ 2.8 s first event, STREAM-1s-paced ≈ 24 s.
-Mac mode is faster for batch / WHOLE-FILE iteration; streaming on
-M4 base has per-call MLX overhead that doesn't amortize, so for
-real Jigasi-style 1 s-chunk simulation use `make dev-docker`. See
-[docs/DECISIONS.md#adr-013](docs/DECISIONS.md) for measurements +
-rationale.
+**Measured perf** (M4 base, whisper-small-mlx, warm model):
+
+| | First event | Total |
+|---|---|---|
+| EN WHOLE (5 s audio) | **0.6 s** | 1.3 s |
+| EN STREAM-1s (5 chunks) | **4.0 s** | 9.7 s |
+| HI WHOLE (2 s audio) | 0.7 s | 2.0 s |
+| HI STREAM-1s (2 chunks) | 21 s | 22 s |
+
+Mac dev is the right path for English streaming and all-language batch
+iteration. **Hindi STREAM** has per-call MLX overhead that doesn't
+amortize on M4 base — use `make dev-docker` for realistic 1 s-chunk
+non-English simulation. See [docs/DECISIONS.md#adr-013](docs/DECISIONS.md)
+for the full measurement matrix + rationale.
 
 ## Quickstart with Docker (works everywhere)
 
