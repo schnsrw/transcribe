@@ -42,6 +42,7 @@ Casual-SST/
 │   ├── dev-linux.yaml       # host on Linux, faster-whisper (CUDA if present)
 │   └── prod.yaml            # Docker on Linux + CUDA + JWT
 ├── docs/
+│   ├── SETUP.md             # end-to-end user guide (dev-mac/linux/docker/prod)
 │   ├── ARCHITECTURE.md      # system overview + diagrams + patterns
 │   ├── CODEGRAPH.md         # module map + dependency graph
 │   ├── DECISIONS.md         # ADRs

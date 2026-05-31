@@ -69,13 +69,15 @@ The first build downloads whisper-small (~500 MB) into the
 
 ## Docs
 
+- **[docs/SETUP.md](docs/SETUP.md)** — **setup guide for Mac dev / Linux dev / Docker / production**
 - **[CLAUDE.md](CLAUDE.md)** — orientation, invariants, conventions
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — system overview + diagrams
 - **[docs/CODEGRAPH.md](docs/CODEGRAPH.md)** — module map + dependency graph
-- **[docs/DECISIONS.md](docs/DECISIONS.md)** — ADRs, including ADR-013 (dual-runtime decision)
+- **[docs/DECISIONS.md](docs/DECISIONS.md)** — ADRs (017 entries)
 - **[docs/PROTOCOL.md](docs/PROTOCOL.md)** — wire format spec
 - **[docs/HALLUCINATION_GUARDS.md](docs/HALLUCINATION_GUARDS.md)** — Whisper hardening stack
 - **[tests/live/README.md](tests/live/README.md)** — live test harness
+- **[.env.example](.env.example)** — every environment variable, documented
 
 ## Tests
 
