@@ -124,13 +124,22 @@ This runs the full test suite (release gate), then builds + pushes
 both the CPU (linux/amd64 + linux/arm64) and CUDA (linux/amd64) images
 to Docker Hub with semver tags + `latest` / `cuda-latest` aliases.
 
-**One-time GitHub setup** (Settings → Secrets and variables → Actions):
+**One-time GitHub setup**:
 
-| Kind | Name | Value |
-|---|---|---|
-| Variable | `DOCKERHUB_USERNAME` | your Docker Hub username |
-| Variable | `DOCKERHUB_REPO` | `casual-sst` (default; override if needed) |
-| Secret | `DOCKERHUB_TOKEN` | Docker Hub access token with read+write |
+1. Create an environment called `release`
+   (Settings → Environments → New environment).
+2. Inside that environment, add two **secrets**:
+
+   | Name | Value |
+   |---|---|
+   | `DOCKERHUB_USERNAME` | your Docker Hub username |
+   | `DOCKERHUB_TOKEN` | Docker Hub access token with read+write on `casual-sst` |
+
+3. (Optional) Add a repo-level **variable** `DOCKERHUB_REPO` if you
+   want the image published under a name other than `casual-sst`.
+4. (Optional) Enable environment protection rules (manual approval,
+   tag-only deploys, etc.) on the `release` environment — the
+   workflow respects them automatically.
 
 ## License
 

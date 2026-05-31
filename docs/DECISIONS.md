@@ -600,6 +600,10 @@ incremental tag pushes are fast.
   immutable artefact, or `:latest` for "newest release".
 - A bad tag breaks the published `:latest` until rolled forward —
   document a tag-then-release-notes flow if that becomes an issue.
-- Required GitHub config: `vars.DOCKERHUB_USERNAME`,
-  `vars.DOCKERHUB_REPO` (optional, defaults to `casual-sst`),
-  `secrets.DOCKERHUB_TOKEN`.
+- GitHub config: a **`release` environment** holds
+  `secrets.DOCKERHUB_USERNAME` + `secrets.DOCKERHUB_TOKEN`. Only the
+  `cpu-image` and `cuda-image` jobs declare `environment: release`,
+  so PR builds and the gating `test` job cannot see those secrets.
+  Repo-level `vars.DOCKERHUB_REPO` is optional (default
+  `casual-sst`). Environment protection rules (approvals, allowed
+  tags) gate publication automatically.

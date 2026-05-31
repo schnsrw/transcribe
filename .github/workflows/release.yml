@@ -12,15 +12,23 @@
 #   3. cuda-image — build linux/amd64 from Dockerfile.cuda, push with
 #                   `cuda-*` tags. (CUDA base image is amd64-only.)
 #
-# Required GitHub repository configuration:
+# Required GitHub configuration:
 #
-#   Variables (Settings → Secrets and variables → Actions → Variables):
-#     DOCKERHUB_USERNAME       — Docker Hub user / org
-#     DOCKERHUB_REPO           — image name (default: casual-sst)
+#   Environment (Settings → Environments → New environment → "release"):
+#     This scopes Docker Hub creds to the release pipeline only — they
+#     are NOT exposed to PR builds or unrelated workflows.
 #
-#   Secrets:
-#     DOCKERHUB_TOKEN          — Docker Hub access token with
-#                                read+write permission on the repo
+#     Environment secrets (add inside the "release" environment):
+#       DOCKERHUB_USERNAME   — Docker Hub user / org
+#       DOCKERHUB_TOKEN      — Docker Hub access token (read+write on
+#                              the casual-sst repo)
+#
+#     Optional repository-level variable (Settings → Variables):
+#       DOCKERHUB_REPO       — image name (default: casual-sst)
+#
+# Optional environment protection rules: require manual approval before
+# publishing, restrict to tags that match v*, etc. — configure these in
+# the environment settings UI; the workflow itself doesn't need changes.
 #
 # How to cut a release:
 #   git tag -a v0.2.0 -m "v0.2.0"
@@ -50,7 +58,10 @@ permissions:
   contents: read
 
 env:
-  DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+  # DOCKERHUB_REPO is allowed to be a repo-level Variable (lowercase
+  # name doesn't matter — it's never secret). Username + token are
+  # bound to the "release" environment and exposed only to the jobs
+  # that declare `environment: release`.
   DOCKERHUB_REPO: ${{ vars.DOCKERHUB_REPO || 'casual-sst' }}
 
 jobs:
@@ -85,6 +96,10 @@ jobs:
     name: build + push CPU (linux/amd64,arm64)
     needs: test
     runs-on: ubuntu-latest
+    # Bind to the `release` environment so DOCKERHUB_USERNAME +
+    # DOCKERHUB_TOKEN resolve from there. Any approval / branch
+    # protection configured on that environment gates this job.
+    environment: release
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -98,14 +113,14 @@ jobs:
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ env.DOCKERHUB_USERNAME }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Generate image tags + labels
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.DOCKERHUB_USERNAME }}/${{ env.DOCKERHUB_REPO }}
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKERHUB_REPO }}
           tags: |
             # On tag push v1.2.3 → produces tags 1.2.3, 1.2, 1, latest.
             type=semver,pattern={{version}}
@@ -134,6 +149,7 @@ jobs:
     name: build + push CUDA (linux/amd64)
     needs: test
     runs-on: ubuntu-latest
+    environment: release
     timeout-minutes: 60       # CUDA base + apt + pip dance is slow.
     steps:
       - uses: actions/checkout@v4
@@ -142,14 +158,14 @@ jobs:
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ env.DOCKERHUB_USERNAME }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Generate CUDA image tags
         id: meta-cuda
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.DOCKERHUB_USERNAME }}/${{ env.DOCKERHUB_REPO }}
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKERHUB_REPO }}
           flavor: |
             # Adds the "cuda-" prefix to every generated tag so the
             # CUDA images coexist with the CPU images under the same repo.
