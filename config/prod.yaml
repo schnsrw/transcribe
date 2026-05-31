@@ -1,9 +1,18 @@
 # Casual-SST — production config
 # ----------------------------------------------------------------------------
 # Inherits everything from base.yaml. Overrides assume:
-#   - one CUDA GPU available (overridable per backend)
-#   - JWT auth enforced
-#   - full multi-backend routing (Voxtral + Parakeet + IndicConformer + Whisper)
+#   - one CUDA GPU available (override per-backend if needed)
+#   - JWT auth enforced (set ASAP_PUB_KEYS_* or JWT_SECRET in .env)
+#   - faster-whisper as the SOLE backend for now
+#
+# Why every route → whisper_turbo right now:
+# -----------------------------------------
+# base.yaml routes some languages to voxtral / parakeet / indic_conformer
+# because that was the long-term plan, but those backend classes are
+# stubs that raise NotImplementedError. Until they're wired with real
+# model loading, we override prod routing to send EVERY language to
+# whisper_turbo (which is fully implemented and well-tested). When you
+# wire one of the other backends, repoint its languages here.
 # ----------------------------------------------------------------------------
 
 extends: base.yaml
@@ -12,20 +21,51 @@ server:
   bypass_auth: false
   port: 8000
 
+# Override base.yaml's per-language routing so nothing lands on a stub.
+routes:
+  en: whisper_turbo
+  hi: whisper_turbo
+  zh: whisper_turbo
+  ar: whisper_turbo
+  fr: whisper_turbo
+  de: whisper_turbo
+  es: whisper_turbo
+  it: whisper_turbo
+  ja: whisper_turbo
+  ko: whisper_turbo
+  nl: whisper_turbo
+  pt: whisper_turbo
+  ru: whisper_turbo
+  ta: whisper_turbo
+  bn: whisper_turbo
+  mr: whisper_turbo
+  te: whisper_turbo
+  pa: whisper_turbo
+  gu: whisper_turbo
+  kn: whisper_turbo
+  ml: whisper_turbo
+  hinglish: whisper_turbo
+  hi-en: whisper_turbo
+  ta-en: whisper_turbo
+  bn-en: whisper_turbo
+  auto: whisper_turbo
+  "*": whisper_turbo
+
 lid:
   device: cuda
 
 backends:
-  voxtral:
-    device: cuda:0
-
-  parakeet:
-    device: cuda:0
-
-  indic_conformer:
-    device: cuda:0
-
   whisper_turbo:
     device: cuda
     compute_type: int8_float16
     model: large-v3-turbo
+
+  # The stubs are left in the file so the router CAN find them in
+  # `base.yaml` lookups, but they will only be instantiated if some
+  # `routes:` entry above points at them. Right now nothing does.
+  # voxtral:
+  #   device: cuda:0
+  # parakeet:
+  #   device: cuda:0
+  # indic_conformer:
+  #   device: cuda:0

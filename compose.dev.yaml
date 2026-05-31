@@ -37,11 +37,11 @@ services:
       # Persistent HF model cache so we re-download the Whisper model once.
       - hf-cache:/cache/huggingface
     healthcheck:
-      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('localhost',8000))"]
+      test: ["CMD", "python", "-c", "import urllib.request,sys; r=urllib.request.urlopen('http://localhost:8000/health',timeout=3); sys.exit(0 if r.status==200 else 1)"]
       interval: 10s
-      timeout: 3s
+      timeout: 5s
       retries: 5
-      start_period: 30s
+      start_period: 60s     # first chunked transcribe also downloads the model
 
   demo:
     image: nginx:1.27-alpine

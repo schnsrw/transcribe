@@ -46,11 +46,15 @@ services:
       # Mount logs to host so journald / loki can scrape if desired.
       - ./logs:/app/logs
     healthcheck:
-      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('localhost',8000))"]
+      # /health is the readiness endpoint — fails until every routed
+      # backend is loaded and callable. /healthz is the cheap
+      # liveness probe; we use /health here so a half-broken server
+      # actually flips unhealthy.
+      test: ["CMD", "python", "-c", "import urllib.request,sys; r=urllib.request.urlopen('http://localhost:8000/health',timeout=3); sys.exit(0 if r.status==200 else 1)"]
       interval: 15s
-      timeout: 3s
+      timeout: 5s
       retries: 5
-      start_period: 60s
+      start_period: 90s     # allow time for first model download
     logging:
       driver: json-file
       options:

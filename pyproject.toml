@@ -10,6 +10,9 @@ packages = [{ include = "casual_sst", from = "src" }]
 python = "^3.11"
 fastapi = "^0.115"
 uvicorn = { version = "^0.30", extras = ["standard"] }
+wsproto = "^1.2"           # uvicorn 0.31 WS impl is broken with websockets >= 14
+PyJWT = { version = "^2.8", extras = ["crypto"] }   # ASAP + HMAC validation in auth.py
+httpx = "^0.27"            # LLM module talks to OpenAI/Ollama via httpx
 pydantic = "^2"
 pyyaml = "^6"
 numpy = "^1.26"

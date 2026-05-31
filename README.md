@@ -9,11 +9,13 @@ by language.
 | | |
 |---|---|
 | Wire protocol | Jigasi-compatible — see [docs/PROTOCOL.md](docs/PROTOCOL.md) |
-| Backends | mlx-whisper (Mac dev) · faster-whisper (Linux + prod) · Voxtral · Parakeet · AI4Bharat IndicConformer (stubs) |
+| Backends | mlx-whisper (Mac dev) · whisper.cpp+Metal (Mac dev alt) · faster-whisper (Linux + prod) · Voxtral · Parakeet · AI4Bharat IndicConformer (stubs) |
 | Languages | 13 native + 25 EU + 8 Indic + 99 fallback |
 | Code-switching | Hinglish · Tanglish · Banglish · `auto` |
 | Hallucination guards | See [docs/HALLUCINATION_GUARDS.md](docs/HALLUCINATION_GUARDS.md) |
-| Configs | `base.yaml` + `local.yaml` (Docker dev) / `dev-mac.yaml` / `dev-linux.yaml` / `prod.yaml` |
+| Configs | `base.yaml` + `local.yaml` (Docker dev) / `dev-mac.yaml` / `dev-mac-cpp.yaml` / `dev-linux.yaml` / `prod.yaml` |
+| Operations | `/healthz` (liveness) · `/health` (readiness) · `/metrics` (Prometheus) · `/admin/` (dashboard, token-gated) |
+| Optional LLM | `POST /api/summarize` — OpenAI-format or Ollama backends |
 
 ## Run matrix
 

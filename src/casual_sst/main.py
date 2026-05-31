@@ -27,6 +27,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from .admin import METRICS, admin_router, install_log_handler, prom_router
 from .auth import AuthError, get_validator
 from .frame import DISCONNECT_BYTE
+from .health import router as health_router
 from .llm import llm_router
 from .meeting import MeetingConnection
 from .router import Router, load_config
@@ -47,6 +48,9 @@ router = Router(cfg)
 router.load_backends()
 
 app = FastAPI(title="Casual-SST")
+# /healthz (liveness, always OK) and /health (readiness, gates traffic).
+# Unauthenticated so load balancers / orchestrators can reach them.
+app.include_router(health_router)
 # Admin / monitoring portal. The router itself returns 404 for every
 # route when ADMIN_TOKEN is unset, so this is a safe no-op by default.
 app.include_router(admin_router)
