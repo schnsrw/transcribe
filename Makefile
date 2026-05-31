@@ -37,8 +37,14 @@ stop:  ## Stop the docker dev stack (keeps the hf-cache volume)
 test:  ## Run unit + integration tests inside Docker
 	docker compose -f compose.test.yaml run --rm tests
 
-prod:  ## Production stack — JWT + CUDA via config/prod.yaml
-	CONFIG_PATH=/app/config/prod.yaml docker compose -f compose.dev.yaml up -d
+prod:  ## Production stack — Linux + NVIDIA GPU + JWT via compose.prod-cuda.yaml
+	docker compose -f compose.prod-cuda.yaml up -d --build
+
+prod-stop:  ## Stop the prod stack (keeps the HF cache volume)
+	docker compose -f compose.prod-cuda.yaml down
+
+prod-logs:  ## Tail the prod stack logs
+	docker compose -f compose.prod-cuda.yaml logs -f
 
 logs:  ## Tail the casual-sst container logs
 	docker logs -f casual-sst

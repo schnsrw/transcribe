@@ -1,0 +1,62 @@
+# Casual-SST — production stack, Linux + NVIDIA GPU.
+#
+# Builds Dockerfile.cuda (which is FROM nvidia/cuda:cudnn-runtime) and
+# attaches the host GPUs via the NVIDIA Container Toolkit. JWT auth is
+# enforced via config/prod.yaml — set the relevant env vars in .env.
+#
+# Prerequisites on the host:
+#   * NVIDIA driver
+#   * nvidia-container-toolkit installed and Docker daemon configured
+#     (`nvidia-ctk runtime configure --runtime=docker && systemctl restart docker`)
+#   * .env file populated from .env.example
+#
+# Usage:
+#   docker compose -f compose.prod-cuda.yaml up -d --build
+#   docker compose -f compose.prod-cuda.yaml logs -f
+#   docker compose -f compose.prod-cuda.yaml down
+#
+# The container's user is non-root (uid 1001). The HF cache is a named
+# volume so the first-pull penalty for whisper-large-v3-turbo (~1.5 GB)
+# is paid once.
+
+services:
+  casual-sst:
+    build:
+      context: .
+      dockerfile: Dockerfile.cuda
+    image: casual-sst:cuda
+    container_name: casual-sst
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      CONFIG_PATH: /app/config/prod.yaml
+      # LOG_LEVEL is also read from .env; ADMIN_TOKEN, JWT_*, HF_TOKEN etc.
+    ports:
+      - "8000:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all                # or `device_ids: ['0']` to pin
+              capabilities: [gpu]
+    volumes:
+      - hf-cache:/cache/huggingface
+      # Mount logs to host so journald / loki can scrape if desired.
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(2); s.connect(('localhost',8000))"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: 25m
+        max-file: "5"
+
+volumes:
+  hf-cache:
+    name: casual-sst-hf-cache-prod

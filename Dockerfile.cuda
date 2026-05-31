@@ -1,0 +1,116 @@
+# syntax=docker/dockerfile:1.7
+# ----------------------------------------------------------------------------
+# Casual-SST — CUDA image for GPU production.
+#
+# Built on NVIDIA's official cuda+cudnn runtime image. faster-whisper /
+# ctranslate2 use CUDA + cuDNN directly (not via torch's CUDA build),
+# so we need cudnn here.
+#
+# Build:
+#   docker build -f Dockerfile.cuda -t casual-sst:cuda .
+# Run:
+#   docker run --rm --gpus all -p 8000:8000 \
+#       -e CONFIG_PATH=/app/config/prod.yaml \
+#       -e ADMIN_TOKEN="$ADMIN_TOKEN" \
+#       casual-sst:cuda
+# Or via compose:
+#   docker compose -f compose.prod-cuda.yaml up -d
+#
+# Image size: ~4 GB (CUDA runtime + cudnn dominate; the Python stack
+# adds ~700 MB). Acceptable on GPU servers; do NOT use this on CPU-only
+# boxes — use the plain `Dockerfile` instead.
+# ----------------------------------------------------------------------------
+
+ARG CUDA_TAG=12.4.1-cudnn-runtime-ubuntu22.04
+ARG PYTHON_VERSION=3.11
+
+FROM nvidia/cuda:${CUDA_TAG} AS builder
+
+ARG PYTHON_VERSION
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_PREFER_BINARY=1
+
+# Python ${PYTHON_VERSION} + system libs that the wheels link against.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        software-properties-common \
+        ca-certificates \
+        curl \
+    && add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        python${PYTHON_VERSION} \
+        python${PYTHON_VERSION}-venv \
+        python${PYTHON_VERSION}-dev \
+        build-essential \
+        ffmpeg \
+        libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python${PYTHON_VERSION} -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+RUN pip install --upgrade pip wheel setuptools
+
+# Same pin set as the CPU Dockerfile, BUT torch is pulled from the
+# CUDA wheel index this time. ctranslate2 / faster-whisper use the
+# CUDA libraries provided by the base image, not torch's.
+RUN pip install \
+        --index-url https://download.pytorch.org/whl/cu124 \
+        --extra-index-url https://pypi.org/simple \
+        "torch>=2.4,<3"
+
+RUN pip install \
+        "fastapi>=0.115,<0.116" \
+        "uvicorn[standard]>=0.30,<0.32" \
+        "wsproto>=1.2" \
+        "pydantic>=2,<3" \
+        "pyyaml>=6,<7" \
+        "numpy>=1.26,<2" \
+        "silero-vad>=5,<6" \
+        "faster-whisper>=1.1,<2" \
+        "uuid6>=2024.7.10"
+
+
+# ============================================================================
+# Stage 2: runtime
+# ============================================================================
+FROM nvidia/cuda:${CUDA_TAG} AS runtime
+
+ARG PYTHON_VERSION
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        software-properties-common ca-certificates \
+    && add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        python${PYTHON_VERSION} \
+        ffmpeg \
+        libsndfile1 \
+        tini \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    HF_HOME=/cache/huggingface \
+    XDG_CACHE_HOME=/cache \
+    CONFIG_PATH=/app/config/prod.yaml \
+    # ctranslate2 picks these up to find CUDA + cuDNN at runtime.
+    LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/local/cuda/extras/CUPTI/lib64
+
+RUN useradd --create-home --uid 1001 --shell /bin/bash casual
+
+WORKDIR /app
+COPY --from=builder /opt/venv /opt/venv
+COPY --chown=casual:casual src /app/src
+COPY --chown=casual:casual config /app/config
+COPY --chown=casual:casual pyproject.toml /app/pyproject.toml
+
+RUN mkdir -p /cache && chown -R casual:casual /cache /app
+
+USER casual
+EXPOSE 8000
+
+ENTRYPOINT ["tini", "--"]
+CMD ["uvicorn", "casual_sst.main:app", "--host", "0.0.0.0", "--port", "8000", "--ws", "wsproto"]

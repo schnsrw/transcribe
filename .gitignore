@@ -38,6 +38,9 @@ config/local.override.yaml
 *.pem
 *.key
 
+# Prod logs directory (mounted by compose.prod-cuda.yaml)
+logs/
+
 # Model weights (don't commit, mount or download at runtime)
 models/
 *.bin
