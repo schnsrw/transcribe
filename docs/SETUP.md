@@ -260,14 +260,17 @@ deploys behind a reverse proxy.
 | Free GPU memory | ≥ 4 GB for large-v3-turbo | `nvidia-smi --query-gpu=memory.free --format=csv` |
 | Free disk | ≥ 10 GB | model cache + image + logs |
 
-Install the NVIDIA Container Toolkit if missing:
+Install the NVIDIA Container Toolkit if missing — full step-by-step
+walkthrough in **[docs/DOCKER_GPU.md](DOCKER_GPU.md)** (driver
+install, toolkit install, multi-GPU pinning, troubleshooting, common
+pitfalls). Short version:
 
 ```bash
-distribution=$(. /etc/os-release; echo $ID$VERSION_ID)
-curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
-curl -fsSL https://nvidia.github.io/libnvidia-container/${distribution}/libnvidia-container.list \
-  | sudo sed 's|deb https://|deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://|' \
-  | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
+    | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
+    | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+    | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
 sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit
 sudo nvidia-ctk runtime configure --runtime=docker
 sudo systemctl restart docker

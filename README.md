@@ -72,6 +72,7 @@ The first build downloads whisper-small (~500 MB) into the
 ## Docs
 
 - **[docs/SETUP.md](docs/SETUP.md)** — **setup guide for Mac dev / Linux dev / Docker / production**
+- **[docs/DOCKER_GPU.md](docs/DOCKER_GPU.md)** — Docker + NVIDIA GPU on Linux (driver, toolkit, troubleshooting)
 - **[CLAUDE.md](CLAUDE.md)** — orientation, invariants, conventions
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — system overview + diagrams
 - **[docs/CODEGRAPH.md](docs/CODEGRAPH.md)** — module map + dependency graph
