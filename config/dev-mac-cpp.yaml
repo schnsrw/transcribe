@@ -1,0 +1,65 @@
+# Casual-SST — Mac host-mode dev, whisper.cpp backend
+# ----------------------------------------------------------------------------
+# Alternative to config/dev-mac.yaml that uses whisper.cpp (+ Metal) via
+# pywhispercpp instead of mlx-whisper. The two have different perf
+# profiles — whisper.cpp keeps the model resident across calls so its
+# streaming path doesn't carry per-call setup overhead. Try this one
+# when 1 s-chunk Jigasi-style streaming on dev-mac feels too slow on
+# non-English audio (see ADR-013 measurements).
+#
+# Launch with `make dev-mac-cpp`.
+# ----------------------------------------------------------------------------
+
+extends: base.yaml
+
+server:
+  bypass_auth: true
+  port: 8100
+
+routes:
+  en: whisper_cpp
+  hi: whisper_cpp
+  zh: whisper_cpp
+  ar: whisper_cpp
+  fr: whisper_cpp
+  de: whisper_cpp
+  es: whisper_cpp
+  it: whisper_cpp
+  ja: whisper_cpp
+  ko: whisper_cpp
+  nl: whisper_cpp
+  pt: whisper_cpp
+  ru: whisper_cpp
+  ta: whisper_cpp
+  bn: whisper_cpp
+  mr: whisper_cpp
+  te: whisper_cpp
+  pa: whisper_cpp
+  gu: whisper_cpp
+  kn: whisper_cpp
+  ml: whisper_cpp
+  hinglish: whisper_cpp
+  hi-en: whisper_cpp
+  ta-en: whisper_cpp
+  bn-en: whisper_cpp
+  auto: whisper_cpp
+  "*": whisper_cpp
+
+lid:
+  device: cpu
+
+backends:
+  whisper_cpp:
+    kind: chunked
+    module: casual_sst.backends.whisper_cpp:WhisperCppBackend
+    # `small` is the streaming default; switch to `large-v3-turbo`
+    # if streaming proves fast enough or for batch / WHOLE-FILE work.
+    # pywhispercpp auto-downloads from ggerganov/whisper.cpp on HF.
+    model: small
+    n_threads: 4
+    # Hallucination guards — same defaults as the other Whisper backends.
+    no_speech_threshold: 0.85
+    logprob_threshold: -0.4
+    compression_ratio_threshold: 2.0
+    min_phrase_prob: 0.5
+    force_split_after_s: 4

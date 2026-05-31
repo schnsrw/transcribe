@@ -19,13 +19,21 @@ protocol and pipeline.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
+from .admin import METRICS, admin_router, install_log_handler
 from .frame import DISCONNECT_BYTE
 from .meeting import MeetingConnection
 from .router import Router, load_config
+
+# Wire the in-memory ring buffer that powers /admin/api/logs into the
+# root logger. Safe no-op if the admin portal is disabled (token unset)
+# — the buffer just collects records nobody reads.
+install_log_handler(level=os.environ.get("LOG_LEVEL", "INFO"))
+log = logging.getLogger("casual_sst")
 
 #: Default config file. ``$CONFIG_PATH`` overrides this — used to switch
 #: between ``config/local.yaml`` (dev defaults) and ``config/prod.yaml``
@@ -37,6 +45,9 @@ router = Router(cfg)
 router.load_backends()
 
 app = FastAPI(title="Casual-SST")
+# Admin / monitoring portal. The router itself returns 404 for every
+# route when ADMIN_TOKEN is unset, so this is a safe no-op by default.
+app.include_router(admin_router)
 
 # Active meetings, keyed by meeting_id. Used by the idle-flush loop to
 # walk every connection at 1 Hz and finalize short utterances. Cleared on
@@ -70,6 +81,8 @@ async def ws_endpoint(
     await websocket.accept()
     conn = MeetingConnection(ws=websocket, meeting_id=meeting_id, cfg=cfg, router=router)
     _meetings[meeting_id] = conn
+    METRICS.total_meetings += 1
+    log.info("meeting opened: %s", meeting_id)
     try:
         while conn.connected:
             try:
@@ -83,6 +96,7 @@ async def ws_endpoint(
     finally:
         await conn.close()
         _meetings.pop(meeting_id, None)
+        log.info("meeting closed: %s", meeting_id)
 
 
 async def _flush_loop() -> None:

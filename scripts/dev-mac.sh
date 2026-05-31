@@ -65,14 +65,17 @@ pip install --quiet \
     "silero-vad>=5,<6" \
     "faster-whisper>=1.1,<2" \
     "uuid6>=2024.7.10" \
-    "mlx-whisper>=0.4.1"
+    "mlx-whisper>=0.4.1" \
+    "pywhispercpp>=1.4.0"
 
 # -----------------------------------------------------------------------------
 # 3. Launch uvicorn with the Mac config. PYTHONPATH lets it import
 #    `casual_sst.*` from src/ without an editable install.
 # -----------------------------------------------------------------------------
 export PYTHONPATH="$PWD/src"
-export CONFIG_PATH="$PWD/config/dev-mac.yaml"
+# CONFIG override lets `make dev-mac-cpp` use config/dev-mac-cpp.yaml
+# while reusing this single launcher script.
+export CONFIG_PATH="$PWD/${CONFIG:-config/dev-mac.yaml}"
 
 PORT="${PORT:-8100}"
 echo "[dev-mac] Casual-SST on http://localhost:${PORT}  (Ctrl-C to stop)"

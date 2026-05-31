@@ -21,6 +21,7 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from .admin.metrics import METRICS
 from .frame import Frame, parse
 from .participant import ParticipantState, _now_ms
 from .router import Router
@@ -63,6 +64,7 @@ class MeetingConnection:
 
         events = await state.push(frame.pcm)
         for ev in events:
+            METRICS.record_event(ev)
             await self._send(ev)
 
     async def flush_idle(self) -> None:
@@ -89,6 +91,7 @@ class MeetingConnection:
                 continue
             events = await state.force_short_flush()
             for ev in events:
+                METRICS.record_event(ev)
                 await self._send(ev)
 
     async def close(self) -> None:

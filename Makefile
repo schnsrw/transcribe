@@ -22,6 +22,9 @@ help:  ## Show available targets
 dev-mac:  ## Host venv on Apple Silicon, mlx-whisper on Metal GPU
 	@./scripts/dev-mac.sh
 
+dev-mac-cpp:  ## Host venv on Apple Silicon, whisper.cpp + Metal (lower streaming overhead)
+	@CONFIG=config/dev-mac-cpp.yaml ./scripts/dev-mac.sh
+
 dev-linux:  ## Host venv on Linux, faster-whisper (CUDA if available)
 	@./scripts/dev-linux.sh
 
